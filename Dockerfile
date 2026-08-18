@@ -12,6 +12,6 @@ COPY . .
 # 给 Linux 引擎执行权限
 RUN chmod +x Linux/pikafish-*
 
-EXPOSE 7860
+EXPOSE 8080
 
-CMD ["gunicorn", "app:app", "--workers", "1", "--bind", "0.0.0.0:7860", "--timeout", "120"]
+CMD ["sh", "-c", "gunicorn app:app --workers 1 --bind 0.0.0.0:${PORT:-8080} --timeout 120"]
