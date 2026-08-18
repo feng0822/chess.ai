@@ -19,6 +19,29 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
     display:flex;align-items:center;justify-content:center;
     font-size:24px;font-weight:bold;cursor:pointer;user-select:none;
     border:2px solid #222;z-index:10;
+    transition:left 0.28s cubic-bezier(0.4,0,0.2,1),top 0.28s cubic-bezier(0.4,0,0.2,1);
+}
+.piece.captured{
+    animation:captureFade 0.28s ease forwards;
+    z-index:5;
+}
+@keyframes captureFade{
+    0%{transform:scale(1);opacity:1;}
+    50%{transform:scale(1.25);opacity:0.7;}
+    100%{transform:scale(0);opacity:0;}
+}
+.piece.in-check{
+    animation:checkPulse 0.7s ease-in-out infinite;
+}
+@keyframes checkPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,50,50,0.9);}
+    50%{box-shadow:0 0 0 8px rgba(255,50,50,0);}
+}
+.piece.last-move-from{
+    box-shadow:0 0 0 3px rgba(255,190,0,0.6);
+}
+.piece.last-move-to{
+    box-shadow:0 0 0 3px rgba(255,190,0,0.9);
 }
 .piece-red{background:#fff8f8;color:#c40000}
 .piece-black{background:#1a1a1a;color:#f8f8f8}
@@ -82,6 +105,8 @@ let validMoves=[];
 let gameOver=false;
 let history=[];
 let isAiThinking = false; // AI正在走棋锁，防止重复点击
+let lastMove = null; // 上一步走子 {sr,sc,tr,tc}
+let inCheckSide = 0; // 被将军的一方：0=无, 1=黑, 2=红
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -116,6 +141,8 @@ function undo(){
     zobristHash = computeHash();
     selected=null;
     validMoves=[];
+    lastMove=null;
+    updateCheckStatus();
     infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
     drawBoard();
     renderPieces();
@@ -132,6 +159,8 @@ function resetGame(){
     history=[];
     positionHistory=[];
     isAiThinking = false;
+    lastMove = null;
+    inCheckSide = 0;
     zobristHash = computeHash();
     infoDom.querySelector("div").innerText = "红方先行";
     drawBoard();
@@ -608,14 +637,16 @@ function updateEvalFromScore(score){
     else { evalText.innerText = "黑方占优 " + (-rounded); }
 }
 
-// AI黑方走棋：优先调用皮卡鱼引擎，失败降级本地AI
+// AI走棋：优先调用皮卡鱼引擎，失败降级本地AI
 async function aiMove(){
     const isAiTurn = turnRed ? (playerSide===1) : (playerSide===2);
     if(gameOver || !isAiTurn || isAiThinking) return;
     isAiThinking = true;
     infoDom.querySelector("div").innerText = "皮卡鱼思考中...";
 
-    let useEngine = false;
+    let moveData = null;
+    let engineScore = null;
+
     try {
         let fen = boardToFEN();
         let resp = await fetch('/api/ai_move', {
@@ -626,46 +657,28 @@ async function aiMove(){
         if(resp.ok){
             let data = await resp.json();
             if(data.bestmove && data.bestmove !== '(none)'){
-                let m = parsePikafishMove(data.bestmove);
-                saveHistory();
-                board[m.tr][m.tc] = {...board[m.sr][m.sc]};
-                board[m.sr][m.sc] = {side:0,id:0};
-                turnRed = !turnRed;
-                positionHistory.push(boardKey());
-                // 引擎评分是当前走子方(AI)视角，转红方视角
-                if(data.score !== null && data.score !== undefined){
-                    lastEngineScore = (aiSideVal() === 1) ? -data.score : data.score;
-                }
-                checkGameEnd();
-                useEngine = true;
+                moveData = parsePikafishMove(data.bestmove);
+                engineScore = data.score;
             }
         }
     } catch(e){
         console.log("皮卡鱼不可用，降级本地AI:", e);
     }
 
-    if(!useEngine){
+    if(!moveData){
         // 降级：本地 minimax AI
-        let m = findBestMove();
-        if(m){
-            saveHistory();
-            board[m.tr][m.tc] = {...board[m.sr][m.sc]};
-            board[m.sr][m.sc] = {side:0,id:0};
-            turnRed = !turnRed;
-            positionHistory.push(boardKey());
-            checkGameEnd();
-        }
-        lastEngineScore = null;
+        moveData = findBestMove();
+        engineScore = null;
     }
 
-    isAiThinking = false;
-    if(!gameOver) infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
-    drawBoard();
-    renderPieces();
-    if(lastEngineScore !== null){
-        updateEvalFromScore(lastEngineScore);
+    if(moveData){
+        saveHistory();
+        animateMove(moveData.sr, moveData.sc, moveData.tr, moveData.tc, () => {
+            finishMove(moveData, engineScore);
+        });
     } else {
-        updateEvaluation();
+        isAiThinking = false;
+        infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
     }
 }
 
@@ -730,32 +743,46 @@ function handleClick(r,c){
             selected={r,c};
             validMoves=getAllValid(r,c);
         }
-    }else{
-        const sr=selected.r;
-        const sc=selected.c;
-        if(sr===r&&sc===c){
-            selected=null;
-            validMoves=[];
-        }else{
-            if(simulateMove(sr,sc,r,c)){
-                saveHistory();
-                board[r][c] = {...board[sr][sc]};
-                board[sr][sc] = {side:0,id:0};
-                turnRed=!turnRed;
-                positionHistory.push(boardKey());
-                updateEvaluation();
-                checkGameEnd();
-                if(!gameOver){
-                    aiMove();
-                }
+        drawBoard();
+        renderPieces();
+        return;
+    }
+    const sr=selected.r;
+    const sc=selected.c;
+    if(sr===r&&sc===c){
+        selected=null;
+        validMoves=[];
+        drawBoard();
+        renderPieces();
+        return;
+    }
+    if(simulateMove(sr,sc,r,c)){
+        saveHistory();
+        selected=null;
+        validMoves=[];
+        animateMove(sr, sc, r, c, () => {
+            board[r][c] = {...board[sr][sc]};
+            board[sr][sc] = {side:0,id:0};
+            turnRed=!turnRed;
+            positionHistory.push(boardKey());
+            lastMove = {sr,sc,tr:r,tc:c};
+            updateCheckStatus();
+            updateEvaluation();
+            checkGameEnd();
+            if(!gameOver){
+                infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+                aiMove();
+            }else{
+                infoDom.querySelector("div").innerText = "游戏结束";
             }
-            selected=null;
-            validMoves=[];
-        }
+            drawBoard();
+            renderPieces();
+        });
+        return;
     }
-    if(!gameOver){
-        infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
-    }
+    // 走法不合法，取消选中
+    selected=null;
+    validMoves=[];
     drawBoard();
     renderPieces();
 }
@@ -849,12 +876,65 @@ function renderPieces(){
             div.innerText = getPieceName(item.side, item.id);
             div.style.left = (ox + viewC(c)*cell - 23) + "px";
             div.style.top = (oy + viewR(r)*cell - 23) + "px";
+            div.dataset.pos = r + "_" + c;
             div.onclick = ()=>click(r,c);
             if(selected && selected.r===r && selected.c===c){
                 div.classList.add("selected");
             }
+            // 将军特效：被将军的将/帅红色脉冲
+            if(item.id===5 && inCheckSide===item.side){
+                div.classList.add("in-check");
+            }
+            // 上一步走子高亮
+            if(lastMove){
+                if(lastMove.sr===r && lastMove.sc===c) div.classList.add("last-move-from");
+                if(lastMove.tr===r && lastMove.tc===c) div.classList.add("last-move-to");
+            }
             boardWrap.appendChild(div);
         }
+    }
+}
+
+// ========== 走子动画 & 特效 ==========
+function animateMove(sr, sc, tr, tc, onDone){
+    const movingEl = document.querySelector(`.piece[data-pos="${sr}_${sc}"]`);
+    const targetEl = document.querySelector(`.piece[data-pos="${tr}_${tc}"]`);
+    const tx = (ox + viewC(tc)*cell - 23) + "px";
+    const ty = (oy + viewR(tr)*cell - 23) + "px";
+    if(targetEl) targetEl.classList.add("captured");
+    if(movingEl){
+        movingEl.style.zIndex = "20";
+        movingEl.style.left = tx;
+        movingEl.style.top = ty;
+    }
+    setTimeout(() => { if(onDone) onDone(); }, 300);
+}
+
+function updateCheckStatus(){
+    const currentSide = turnRed ? 2 : 1;
+    inCheckSide = isInCheck(currentSide) ? currentSide : 0;
+}
+
+// AI走子后的统一收尾（更新数据+渲染+评估）
+function finishMove(moveData, engineScore){
+    board[moveData.tr][moveData.tc] = {...board[moveData.sr][moveData.sc]};
+    board[moveData.sr][moveData.sc] = {side:0,id:0};
+    turnRed = !turnRed;
+    positionHistory.push(boardKey());
+    lastMove = {sr:moveData.sr, sc:moveData.sc, tr:moveData.tr, tc:moveData.tc};
+    updateCheckStatus();
+    checkGameEnd();
+    isAiThinking = false;
+    if(!gameOver) infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+    else infoDom.querySelector("div").innerText = "游戏结束";
+    drawBoard();
+    renderPieces();
+    if(engineScore !== null && engineScore !== undefined){
+        lastEngineScore = (aiSideVal() === 1) ? -engineScore : engineScore;
+        updateEvalFromScore(lastEngineScore);
+    } else {
+        lastEngineScore = null;
+        updateEvaluation();
     }
 }
 
