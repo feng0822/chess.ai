@@ -1,3 +1,13 @@
+---
+title: Chinese Chess AI
+emoji: ♟️
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 中国象棋 AI 对弈网站
 
 基于 Flask + 皮卡鱼（Pikafish）引擎的中国象棋人机对弈网站，支持实时局面评估。

@@ -98,7 +98,8 @@ def find_pikafish():
                 if f.lower().endswith('.exe') and 'pikafish' in f.lower():
                     return os.path.join(root, f)
     else:
-        # Linux / Mac: 找无后缀二进制
+        # Linux / Mac: 找无后缀二进制，优先最兼容版本
+        priority = ['sse41-popcnt', 'avx2', 'bmi2', 'avxvnni']
         subdirs = ['Linux', 'MacOS']
         if sys.platform == 'darwin':
             subdirs = ['MacOS', 'Linux']
@@ -106,14 +107,20 @@ def find_pikafish():
             d = os.path.join(BASE_DIR, sub)
             if not os.path.isdir(d):
                 continue
-            for f in sorted(os.listdir(d)):
+            all_bins = [f for f in os.listdir(d)
+                        if os.path.isfile(os.path.join(d, f))
+                        and 'pikafish' in f.lower()
+                        and not _is_blacklisted(f)]
+            # 按优先级排序
+            def _prio(name):
+                n = name.lower()
+                for i, key in enumerate(priority):
+                    if key in n:
+                        return i
+                return len(priority)
+            all_bins.sort(key=_prio)
+            for f in all_bins:
                 path = os.path.join(d, f)
-                if not os.path.isfile(path):
-                    continue
-                if 'pikafish' not in f.lower():
-                    continue
-                if _is_blacklisted(f):
-                    continue
                 try:
                     os.chmod(path, 0o755)
                 except Exception:
