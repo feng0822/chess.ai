@@ -78,6 +78,19 @@ chess_project/
 - 局面用 FEN 格式传递，引擎返回 bestmove 和 score
 - 本地降级 AI：Minimax + Alpha-Beta 剪枝 + 置换表 + 空着裁剪 + 静态搜索
 
+## 部署到公网（Render 免费套餐）
+
+项目已包含 `render.yaml`，可一键部署到 Render：
+
+1. 将代码推送到 GitHub 仓库
+2. 打开 https://dashboard.render.com ，选 **New → Web Service**
+3. 连接你的 GitHub 仓库
+4. Render 会自动读取 `render.yaml`，点击 **Apply**
+5. 部署完成后访问 `https://你的服务名.onrender.com` 即可在线对战
+
+> Render 免费套餐冷启动需 30-60 秒，15 分钟无请求会休眠（下次访问自动唤醒）。
+> 皮卡鱼引擎使用 Linux 版二进制（`Linux/` 目录），已随仓库提交。
+
 ## License
 
 GPL-3.0（皮卡鱼引擎采用 GPL-3.0）

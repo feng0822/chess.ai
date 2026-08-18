@@ -1,11 +1,14 @@
 import os
+import platform
 import subprocess
+import sys
 import threading
 import time
-import webbrowser
 from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='static', static_url_path='')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IS_PRODUCTION = bool(os.environ.get('RENDER') or os.environ.get('PRODUCTION') or os.environ.get('PORT'))
 
 
 class PikafishEngine:
@@ -21,6 +24,7 @@ class PikafishEngine:
             bufsize=1,
             encoding='utf-8',
             errors='replace',
+            cwd=BASE_DIR,
         )
         self._init_uci()
 
@@ -76,22 +80,55 @@ class PikafishEngine:
 
 
 def find_pikafish():
-    """在项目目录中查找皮卡鱼 exe"""
-    base = os.path.dirname(os.path.abspath(__file__))
-    for root, _dirs, files in os.walk(base):
-        for f in files:
-            if f.lower().endswith('.exe') and 'pikafish' in f.lower():
-                # 优先选通用版，避免 avx512 等不兼容版本
-                path = os.path.join(root, f)
-                name_lower = f.lower()
-                if 'avx512' in name_lower or 'vnni512' in name_lower:
+    """在项目目录中查找皮卡鱼引擎（支持 Windows/Linux/Mac）"""
+    def _is_blacklisted(name):
+        n = name.lower()
+        return 'avx512' in n or 'vnni512' in n
+
+    if sys.platform == 'win32':
+        # Windows: 找 .exe
+        for root, _dirs, files in os.walk(BASE_DIR):
+            for f in files:
+                if f.lower().endswith('.exe') and 'pikafish' in f.lower():
+                    if _is_blacklisted(f):
+                        continue
+                    return os.path.join(root, f)
+        for root, _dirs, files in os.walk(BASE_DIR):
+            for f in files:
+                if f.lower().endswith('.exe') and 'pikafish' in f.lower():
+                    return os.path.join(root, f)
+    else:
+        # Linux / Mac: 找无后缀二进制
+        subdirs = ['Linux', 'MacOS']
+        if sys.platform == 'darwin':
+            subdirs = ['MacOS', 'Linux']
+        for sub in subdirs:
+            d = os.path.join(BASE_DIR, sub)
+            if not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                path = os.path.join(d, f)
+                if not os.path.isfile(path):
                     continue
+                if 'pikafish' not in f.lower():
+                    continue
+                if _is_blacklisted(f):
+                    continue
+                try:
+                    os.chmod(path, 0o755)
+                except Exception:
+                    pass
                 return path
-    # 退而求其次
-    for root, _dirs, files in os.walk(base):
-        for f in files:
-            if f.lower().endswith('.exe') and 'pikafish' in f.lower():
-                return os.path.join(root, f)
+        # 兜底：任意 pikafish 无后缀文件
+        for root, _dirs, files in os.walk(BASE_DIR):
+            for f in files:
+                if 'pikafish' in f.lower() and '.' not in f:
+                    path = os.path.join(root, f)
+                    try:
+                        os.chmod(path, 0o755)
+                    except Exception:
+                        pass
+                    return path
     return None
 
 
@@ -135,8 +172,13 @@ def engine_status():
 
 
 if __name__ == '__main__':
-    def _open_browser():
-        time.sleep(1.5)
-        webbrowser.open('http://127.0.0.1:5000')
-    threading.Thread(target=_open_browser, daemon=True).start()
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    if IS_PRODUCTION:
+        app.run(host='0.0.0.0', port=port)
+    else:
+        import webbrowser
+        def _open_browser():
+            time.sleep(1.5)
+            webbrowser.open(f'http://127.0.0.1:{port}')
+        threading.Thread(target=_open_browser, daemon=True).start()
+        app.run(host='127.0.0.1', port=port, debug=False)

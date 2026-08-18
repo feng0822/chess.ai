@@ -49,6 +49,11 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
             <option value="3">中等</option>
             <option value="4" selected>困难</option>
         </select>
+        <label style="font-size:14px;margin-right:4px;">执子：</label>
+        <select id="sideSelect" style="padding:6px 8px;font-size:14px;margin-right:10px;">
+            <option value="2" selected>红方（先行）</option>
+            <option value="1">黑方（后手）</option>
+        </select>
         <button id="restartBtn">重新开始</button>
         <button id="undoBtn">悔棋</button>
     </div>
@@ -97,6 +102,12 @@ function saveHistory(){
 
 function undo(){
     if(history.length===0 || isAiThinking) return;
+    const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
+    // 玩家回合时撤销两步（玩家+AI），回到玩家上一步
+    if(isPlayerTurn && history.length >= 2){
+        history.pop();
+        positionHistory.pop();
+    }
     let last = history.pop();
     board = last.board;
     turnRed = last.turnRed;
@@ -105,7 +116,7 @@ function undo(){
     zobristHash = computeHash();
     selected=null;
     validMoves=[];
-    infoDom.querySelector("div").innerText = turnRed ? "红方先行" : "黑方走棋";
+    infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
     drawBoard();
     renderPieces();
     updateEvaluation();
@@ -115,7 +126,7 @@ undoBtn.onclick = undo;
 function resetGame(){
     board = JSON.parse(JSON.stringify(initBoardData));
     selected=null;
-    turnRed=true;
+    turnRed=true; // 红方先行
     validMoves=[];
     gameOver=false;
     history=[];
@@ -126,6 +137,10 @@ function resetGame(){
     drawBoard();
     renderPieces();
     updateEvaluation();
+    // 玩家选黑方时，AI是红方，先走
+    if(playerSide === 1){
+        aiMove();
+    }
 }
 restartBtn.onclick = resetGame;
 
@@ -135,6 +150,16 @@ let aiDepth = 4;
 let aiTimeLimit = 8000; // 迭代加深时间上限(ms)
 let positionHistory = []; // 局面历史，用于长将/重复检测
 let searchStartTime = 0;
+let playerSide = 2; // 玩家执子：2=红方, 1=黑方
+const aiSideVal = () => 3 - playerSide; // AI执子
+const boardFlipped = () => playerSide === 1; // 黑方在下时翻转棋盘
+function viewR(r){ return boardFlipped() ? 9 - r : r; }
+function viewC(c){ return boardFlipped() ? 8 - c : c; }
+
+document.getElementById("sideSelect").onchange = function(){
+    playerSide = parseInt(this.value);
+    resetGame();
+};
 
 document.getElementById("difficulty").onchange = function(){
     aiDepth = parseInt(this.value);
@@ -371,7 +396,7 @@ const NULL_R = 2;
 // 静态搜索
 function quiescence(alpha, beta, maximizing, qDepth){
     if(timeUp() || qDepth > 6) return evaluateBoard();
-    let side = maximizing ? 1 : 2;
+    let side = maximizing ? aiSideVal() : playerSide;
     let inCheck = isInCheck(side);
     let standPat = evaluateBoard();
     if(maximizing){
@@ -405,7 +430,7 @@ function quiescence(alpha, beta, maximizing, qDepth){
 function minimax(depth, alpha, beta, maximizing){
     if(timeUp()) return evaluateBoard();
     let alphaOrig = alpha;
-    let side = maximizing ? 1 : 2;
+    let side = maximizing ? aiSideVal() : playerSide;
 
     // 置换表查询
     let tt = transpositionTable.get(zobristHash);
@@ -445,7 +470,7 @@ function minimax(depth, alpha, beta, maximizing){
         let maxEval = -Infinity;
         for(let m of moves){
             let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
-            if(!isKingFaceToFace() && !isInCheck(1)){
+            if(!isKingFaceToFace() && !isInCheck(side)){
                 legalCount++;
                 let val = minimax(depth-1, alpha, beta, false);
                 if(val > maxEval){ maxEval = val; bestMove = m; }
@@ -455,7 +480,7 @@ function minimax(depth, alpha, beta, maximizing){
             if(beta <= alpha) break;
         }
         if(legalCount===0){
-            let s = isInCheck(1) ? -99999 - depth : 0;
+            let s = isInCheck(side) ? -99999 - depth : 0;
             ttStore(zobristHash, depth, s, TT_EXACT, null);
             return s;
         }
@@ -466,7 +491,7 @@ function minimax(depth, alpha, beta, maximizing){
         let minEval = Infinity;
         for(let m of moves){
             let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
-            if(!isKingFaceToFace() && !isInCheck(2)){
+            if(!isKingFaceToFace() && !isInCheck(side)){
                 legalCount++;
                 let val = minimax(depth-1, alpha, beta, true);
                 if(val < minEval){ minEval = val; bestMove = m; }
@@ -476,7 +501,7 @@ function minimax(depth, alpha, beta, maximizing){
             if(beta <= alpha) break;
         }
         if(legalCount===0){
-            let s = isInCheck(2) ? 99999 + depth : 0;
+            let s = isInCheck(side) ? 99999 + depth : 0;
             ttStore(zobristHash, depth, s, TT_EXACT, null);
             return s;
         }
@@ -488,7 +513,8 @@ function minimax(depth, alpha, beta, maximizing){
 
 // 搜索指定深度的最佳招法
 function searchBestMove(depth, prevBest){
-    let moves = generatePseudoMoves(1);
+    const asv = aiSideVal();
+    let moves = generatePseudoMoves(asv);
     if(moves.length===0) return null;
     if(prevBest){
         moves = moves.filter(m =>
@@ -502,9 +528,9 @@ function searchBestMove(depth, prevBest){
     let beta = Infinity;
     for(let m of moves){
         let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
-        if(!isKingFaceToFace() && !isInCheck(1)){
+        if(!isKingFaceToFace() && !isInCheck(asv)){
             let key = boardKey();
-            let isChecking = isInCheck(2);
+            let isChecking = isInCheck(playerSide);
             let isRepeat = positionHistory.includes(key);
             let score = (isRepeat && isChecking) ? -99999 : minimax(depth-1, alpha, beta, false);
             if(score > bestScore){ bestScore = score; bestMove = m; }
@@ -584,7 +610,8 @@ function updateEvalFromScore(score){
 
 // AI黑方走棋：优先调用皮卡鱼引擎，失败降级本地AI
 async function aiMove(){
-    if(gameOver || turnRed || isAiThinking) return;
+    const isAiTurn = turnRed ? (playerSide===1) : (playerSide===2);
+    if(gameOver || !isAiTurn || isAiThinking) return;
     isAiThinking = true;
     infoDom.querySelector("div").innerText = "皮卡鱼思考中...";
 
@@ -605,9 +632,9 @@ async function aiMove(){
                 board[m.sr][m.sc] = {side:0,id:0};
                 turnRed = !turnRed;
                 positionHistory.push(boardKey());
-                // 引擎评分是当前走子方(黑方)视角，转红方视角取负
+                // 引擎评分是当前走子方(AI)视角，转红方视角
                 if(data.score !== null && data.score !== undefined){
-                    lastEngineScore = -data.score;
+                    lastEngineScore = (aiSideVal() === 1) ? -data.score : data.score;
                 }
                 checkGameEnd();
                 useEngine = true;
@@ -632,7 +659,7 @@ async function aiMove(){
     }
 
     isAiThinking = false;
-    if(!gameOver) infoDom.querySelector("div").innerText = "红方走棋";
+    if(!gameOver) infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
     drawBoard();
     renderPieces();
     if(lastEngineScore !== null){
@@ -687,6 +714,7 @@ canvas.onclick = function(e){
     const my = e.clientY - rect.top;
     let c = Math.round((mx - ox)/cell);
     let r = Math.round((my - oy)/cell);
+    if(boardFlipped()){ r = 9 - r; c = 8 - c; }
     if(c>=0&&c<=8&&r>=0&&r<=9){
         handleClick(r,c);
     }
@@ -694,36 +722,35 @@ canvas.onclick = function(e){
 
 function handleClick(r,c){
     if(gameOver || isAiThinking) return;
+    const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
+    if(!isPlayerTurn) return;
     const piece = board[r][c];
-    if(turnRed){
-        if(selected === null){
-            if(piece.id!==0 && piece.side===2){
-                selected={r,c};
-                validMoves=getAllValid(r,c);
-            }
+    if(selected === null){
+        if(piece.id!==0 && piece.side===playerSide){
+            selected={r,c};
+            validMoves=getAllValid(r,c);
+        }
+    }else{
+        const sr=selected.r;
+        const sc=selected.c;
+        if(sr===r&&sc===c){
+            selected=null;
+            validMoves=[];
         }else{
-            const sr=selected.r;
-            const sc=selected.c;
-            if(sr===r&&sc===c){
-                selected=null;
-                validMoves=[];
-            }else{
-                if(simulateMove(sr,sc,r,c)){
-                    saveHistory();
-                    board[r][c] = {...board[sr][sc]};
-                    board[sr][sc] = {side:0,id:0};
-                    turnRed=!turnRed;
-                    positionHistory.push(boardKey());
-                    updateEvaluation();
-                    checkGameEnd();
-                    // =========关键：红方走完，自动调用AI黑方走棋=========
-                    if(!gameOver){
-                        aiMove();
-                    }
+            if(simulateMove(sr,sc,r,c)){
+                saveHistory();
+                board[r][c] = {...board[sr][sc]};
+                board[sr][sc] = {side:0,id:0};
+                turnRed=!turnRed;
+                positionHistory.push(boardKey());
+                updateEvaluation();
+                checkGameEnd();
+                if(!gameOver){
+                    aiMove();
                 }
-                selected=null;
-                validMoves=[];
             }
+            selected=null;
+            validMoves=[];
         }
     }
     if(!gameOver){
@@ -786,8 +813,8 @@ function drawBoard(){
 
     ctx.fillStyle="rgba(0,120,255,0.45)";
     for(let m of validMoves){
-        let x=ox+m.c*cell;
-        let y=oy+m.r*cell;
+        let x=ox+viewC(m.c)*cell;
+        let y=oy+viewR(m.r)*cell;
         ctx.beginPath();
         ctx.arc(x,y,11,0,Math.PI*2);
         ctx.fill();
@@ -820,8 +847,8 @@ function renderPieces(){
             const div=document.createElement("div");
             div.className = item.side===2 ? "piece piece-red" : "piece piece-black";
             div.innerText = getPieceName(item.side, item.id);
-            div.style.left = (ox + c*cell - 23) + "px";
-            div.style.top = (oy + r*cell - 23) + "px";
+            div.style.left = (ox + viewC(c)*cell - 23) + "px";
+            div.style.top = (oy + viewR(r)*cell - 23) + "px";
             div.onclick = ()=>click(r,c);
             if(selected && selected.r===r && selected.c===c){
                 div.classList.add("selected");
