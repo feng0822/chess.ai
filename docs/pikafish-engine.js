@@ -14,7 +14,7 @@ class PikafishEngine {
         this.worker = null;
         this.ready = false;
         this.nnueUrl = options.nnueUrl || 'pikafish.nnue';
-        this.wasmUrl = options.wasmUrl || 'pikafish.js';
+        this.wasmUrl = options.wasmUrl || 'worker.js';
         this.onInfo = options.onInfo || null;      // info 行回调
         this.onBestMove = options.onBestMove || null; // bestmove 回调
         this._uciReady = false;
@@ -30,10 +30,10 @@ class PikafishEngine {
         return new Promise((resolve, reject) => {
             this.worker = new Worker(this.wasmUrl);
 
-            // 超时保护
+            // 超时保护（NNUE 49MB，给足下载时间）
             const timeout = setTimeout(() => {
                 reject(new Error('引擎初始化超时（可能是WASM或NNUE加载失败）'));
-            }, 60000);
+            }, 120000);
 
             this.worker.onmessage = (e) => {
                 const msg = e.data;
