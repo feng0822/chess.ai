@@ -39,7 +39,7 @@ class PikafishEngine {
                     this._loadNnue();
                 } else if (msg.type === 'nnue_loaded') {
                     this._progress('NNUE 加载完成，引擎启动中...');
-                    this._send('uci');
+                    // uci 命令已在 Worker 中预写入 stdin，直接等待 uciok
                 } else if (msg.type === 'worker_error') {
                     clearTimeout(timeout);
                     reject(new Error('Worker内部错误: ' + msg.data));
