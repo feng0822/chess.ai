@@ -123,6 +123,9 @@ async function initPikafishEngine() {
         pikafishEngine = new PikafishEngine({
             nnueUrl: 'pikafish.nnue',
             wasmUrl: 'worker.js',
+            onProgress: (text) => {
+                infoDom.querySelector("div").innerText = text;
+            },
             onInfo: (info) => {
                 // 思考中实时更新评估条
                 if (info.score !== undefined && info.scoreType === 'cp') {

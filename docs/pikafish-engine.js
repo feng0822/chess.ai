@@ -1,13 +1,6 @@
 /**
  * PikafishEngine - 皮卡鱼 WASM 前端封装
  * AI 运算全部在浏览器本地 Worker 中执行，无需后端服务器
- *
- * 使用方法：
- *   const engine = new PikafishEngine();
- *   await engine.init();
- *   engine.setSkillLevel(10);
- *   const move = await engine.go(fen, 1000); // 思考1秒
- *   engine.stop();
  */
 class PikafishEngine {
     constructor(options = {}) {
@@ -15,34 +8,41 @@ class PikafishEngine {
         this.ready = false;
         this.nnueUrl = options.nnueUrl || 'pikafish.nnue';
         this.wasmUrl = options.wasmUrl || 'worker.js';
-        this.onInfo = options.onInfo || null;      // info 行回调
-        this.onBestMove = options.onBestMove || null; // bestmove 回调
+        this.onInfo = options.onInfo || null;
+        this.onBestMove = options.onBestMove || null;
+        this.onProgress = options.onProgress || null; // 进度回调
         this._uciReady = false;
-        this._resolveQueue = [];  // 等待特定输出的 Promise
+        this._resolveQueue = [];
         this._bestMove = null;
         this._infoBuffer = [];
     }
 
-    /**
-     * 初始化引擎：创建Worker → 加载NNUE → UCI握手
-     */
+    _progress(text) {
+        console.log('[Pikafish]', text);
+        if (this.onProgress) this.onProgress(text);
+    }
+
     async init() {
         return new Promise((resolve, reject) => {
+            this._progress('创建 Worker...');
             this.worker = new Worker(this.wasmUrl);
 
-            // 超时保护（NNUE 49MB，给足下载时间）
+            // 超时：NNUE 49MB 可能下载较慢，给 5 分钟
             const timeout = setTimeout(() => {
-                reject(new Error('引擎初始化超时（可能是WASM或NNUE加载失败）'));
-            }, 120000);
+                reject(new Error('初始化超时（请检查网络，NNUE 49MB 下载可能较慢）'));
+            }, 300000);
 
             this.worker.onmessage = (e) => {
                 const msg = e.data;
                 if (msg.type === 'module_ready') {
-                    // WASM模块就绪，开始加载NNUE
+                    this._progress('WASM 初始化完成，开始下载 NNUE...');
                     this._loadNnue();
                 } else if (msg.type === 'nnue_loaded') {
-                    // NNUE加载完成，发送UCI初始化命令
+                    this._progress('NNUE 加载完成，引擎启动中...');
                     this._send('uci');
+                } else if (msg.type === 'worker_error') {
+                    clearTimeout(timeout);
+                    reject(new Error('Worker内部错误: ' + msg.data));
                 } else if (msg.type === 'stdout') {
                     this._handleStdout(msg.data);
                 } else if (msg.type === 'stderr') {
@@ -52,62 +52,75 @@ class PikafishEngine {
 
             this.worker.onerror = (err) => {
                 clearTimeout(timeout);
-                reject(new Error('Worker错误: ' + err.message));
+                reject(new Error('Worker错误: ' + err.message + ' (文件名:' + err.filename + ':' + err.lineno + ')'));
             };
 
-            // 等待 uciok + readyok
             this._waitFor('uciok').then(() => {
+                this._progress('UCI 握手完成，等待引擎就绪...');
                 this._uciReady = true;
                 this._send('isready');
                 return this._waitFor('readyok');
             }).then(() => {
                 this.ready = true;
                 clearTimeout(timeout);
+                this._progress('引擎就绪！');
                 resolve();
             }).catch(reject);
         });
     }
 
-    /**
-     * 加载NNUE文件并发送给Worker
-     */
     async _loadNnue() {
         try {
             const resp = await fetch(this.nnueUrl);
-            const buffer = await resp.arrayBuffer();
-            this.worker.postMessage({ type: 'nnue', data: buffer }, [buffer]);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const total = resp.headers.get('content-length');
+            let loaded = 0;
+            const reader = resp.body.getReader();
+            const chunks = [];
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                loaded += value.length;
+                if (total) {
+                    const pct = Math.round(loaded / total * 100);
+                    const mb = (loaded / 1048576).toFixed(1);
+                    const totalMb = (total / 1048576).toFixed(0);
+                    this._progress(`下载 NNUE: ${mb}/${totalMb}MB (${pct}%)`);
+                } else {
+                    const mb = (loaded / 1048576).toFixed(1);
+                    this._progress(`下载 NNUE: ${mb}MB...`);
+                }
+            }
+            const buffer = new Uint8Array(loaded);
+            let offset = 0;
+            for (const chunk of chunks) {
+                buffer.set(chunk, offset);
+                offset += chunk.length;
+            }
+            this._progress('NNUE 下载完成，发送给引擎...');
+            this.worker.postMessage({ type: 'nnue', data: buffer.buffer }, [buffer.buffer]);
         } catch (e) {
             console.error('NNUE加载失败:', e);
+            throw e;
         }
     }
 
-    /**
-     * 处理Worker返回的stdout行
-     */
     _handleStdout(line) {
         if (!line) return;
-
-        // 触发 info 回调
         if (line.startsWith('info') && this.onInfo) {
             this.onInfo(this._parseInfo(line));
         }
-
-        // bestmove
         if (line.startsWith('bestmove')) {
             const parts = line.split(/\s+/);
             this._bestMove = parts[1] || null;
             if (this.onBestMove) this.onBestMove(this._bestMove);
             this._resolveWaiting('bestmove');
         }
-
-        // uciok / readyok
         if (line === 'uciok') this._resolveWaiting('uciok');
         if (line === 'readyok') this._resolveWaiting('readyok');
     }
 
-    /**
-     * 解析 info 行，提取深度、分数、PV等
-     */
     _parseInfo(line) {
         const info = { raw: line };
         const parts = line.split(/\s+/);
@@ -121,23 +134,15 @@ class PikafishEngine {
                 info.scoreType = parts[i+1];
                 info.score = parseInt(parts[i+2]);
             }
-            if (parts[i] === 'pv') {
-                info.pv = parts.slice(i+1);
-            }
+            if (parts[i] === 'pv') info.pv = parts.slice(i+1);
         }
         return info;
     }
 
-    /**
-     * 发送命令给引擎
-     */
     _send(cmd) {
         if (this.worker) this.worker.postMessage(cmd);
     }
 
-    /**
-     * 等待特定输出标记
-     */
     _waitFor(token) {
         return new Promise((resolve) => {
             this._resolveQueue.push({ token, resolve });
@@ -152,17 +157,11 @@ class PikafishEngine {
         }
     }
 
-    /**
-     * 设置技能等级（0-20），替代固定深度，全平台难度统一
-     */
     setSkillLevel(level) {
         level = Math.max(0, Math.min(20, level));
         this._send(`setoption name Skill Level value ${level}`);
     }
 
-    /**
-     * 设置思考时间（毫秒）
-     */
     async go(fen, movetime = 1000) {
         if (!this.ready) throw new Error('引擎未就绪');
         this._bestMove = null;
@@ -173,23 +172,9 @@ class PikafishEngine {
         return this._bestMove;
     }
 
-    /**
-     * 停止思考
-     */
-    stop() {
-        this._send('stop');
-    }
+    stop() { this._send('stop'); }
+    newGame() { this._send('ucinewgame'); }
 
-    /**
-     * 新对局
-     */
-    newGame() {
-        this._send('ucinewgame');
-    }
-
-    /**
-     * 终止引擎，释放Worker
-     */
     quit() {
         if (this.worker) {
             this._send('quit');
@@ -200,7 +185,6 @@ class PikafishEngine {
     }
 }
 
-// 导出到全局
 if (typeof window !== 'undefined') {
     window.PikafishEngine = PikafishEngine;
 }
