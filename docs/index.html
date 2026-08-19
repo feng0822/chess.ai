@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>中国象棋</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:"SimHei","Microsoft YaHei"}
+body{background:#f0e2cb;display:flex;flex-direction:column;align-items:center;padding:14px}
+#info-bar{margin-bottom:8px;font-size:16px;text-align:center;}
+.btn-group{margin-top:6px;}
+button{padding:6px 14px;font-size:14px;margin:0 5px}
+#boardWrap{position:relative}
+#canvas{
+    border:4px solid #703810;
+    background:#ddb883;
+}
+.piece{
+    width:46px;height:46px;border-radius:50%;position:absolute;
+    display:flex;align-items:center;justify-content:center;
+    font-size:24px;font-weight:bold;cursor:pointer;user-select:none;
+    border:2px solid #222;z-index:10;
+    transition:left 0.28s cubic-bezier(0.4,0,0.2,1),top 0.28s cubic-bezier(0.4,0,0.2,1);
+}
+.piece.captured{
+    animation:captureFade 0.28s ease forwards;
+    z-index:5;
+}
+@keyframes captureFade{
+    0%{transform:scale(1);opacity:1;}
+    50%{transform:scale(1.25);opacity:0.7;}
+    100%{transform:scale(0);opacity:0;}
+}
+.piece.in-check{
+    animation:checkPulse 0.7s ease-in-out infinite;
+}
+@keyframes checkPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,50,50,0.9);}
+    50%{box-shadow:0 0 0 8px rgba(255,50,50,0);}
+}
+.piece.last-move-from{
+    box-shadow:0 0 0 3px rgba(255,190,0,0.6);
+}
+.piece.last-move-to{
+    box-shadow:0 0 0 3px rgba(255,190,0,0.9);
+}
+.piece-red{background:#fff8f8;color:#c40000}
+.piece-black{background:#1a1a1a;color:#f8f8f8}
+.piece.selected{box-shadow:0 0 0 4px #0088ff}
+#eval-bar-wrap{width:468px;margin:4px 0 8px;}
+#eval-bar{position:relative;height:18px;border-radius:4px;overflow:hidden;border:1px solid #5c3010;}
+#eval-red{position:absolute;left:0;top:0;height:100%;background:#c40000;width:50%;transition:width 0.4s ease;}
+#eval-black{position:absolute;right:0;top:0;height:100%;background:#1a1a1a;width:50%;transition:width 0.4s ease;}
+#eval-indicator{position:absolute;top:-3px;bottom:-3px;width:3px;background:#fff;left:50%;transform:translateX(-50%);z-index:5;transition:left 0.4s ease;box-shadow:0 0 4px rgba(0,0,0,0.6);}
+#eval-text{text-align:center;font-size:14px;margin-top:4px;color:#3a2010;}
+</style>
+</head>
+<body>
+<div id="info-bar">
+    <div>红方先行</div>
+    <div id="eval-bar-wrap">
+        <div id="eval-bar">
+            <div id="eval-red"></div>
+            <div id="eval-black"></div>
+            <div id="eval-indicator"></div>
+        </div>
+        <div id="eval-text">均势</div>
+    </div>
+    <div class="btn-group">
+        <label style="font-size:14px;margin-right:4px;">AI难度：</label>
+        <select id="difficulty" style="padding:6px 8px;font-size:14px;margin-right:10px;">
+            <option value="2">入门</option>
+            <option value="6">业余</option>
+            <option value="10" selected>进阶</option>
+            <option value="15">大师</option>
+            <option value="20">巅峰</option>
+        </select>
+        <label style="font-size:14px;margin-right:4px;">执子：</label>
+        <select id="sideSelect" style="padding:6px 8px;font-size:14px;margin-right:10px;">
+            <option value="2" selected>红方（先行）</option>
+            <option value="1">黑方（后手）</option>
+        </select>
+        <button id="restartBtn">重新开始</button>
+        <button id="undoBtn">悔棋</button>
+    </div>
+</div>
+<div id="boardWrap">
+<canvas id="canvas" width="468" height="520"></canvas>
+</div>
+<script src="pikafish-engine.js"></script>
+<script>
+const initBoardData = [
+    [{side:1,id:1},{side:1,id:2},{side:1,id:3},{side:1,id:4},{side:1,id:5},{side:1,id:4},{side:1,id:3},{side:1,id:2},{side:1,id:1}],
+    [{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0}],
+    [{side:0,id:0},{side:1,id:6},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:1,id:6},{side:0,id:0}],
+    [{side:1,id:7},{side:0,id:0},{side:1,id:7},{side:0,id:0},{side:1,id:7},{side:0,id:0},{side:1,id:7},{side:0,id:0},{side:1,id:7}],
+    [{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0}],
+    [{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0}],
+    [{side:2,id:7},{side:0,id:0},{side:2,id:7},{side:0,id:0},{side:2,id:7},{side:0,id:0},{side:2,id:7},{side:0,id:0},{side:2,id:7}],
+    [{side:0,id:0},{side:2,id:6},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:2,id:6},{side:0,id:0}],
+    [{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0},{side:0,id:0}],
+    [{side:2,id:1},{side:2,id:2},{side:2,id:3},{side:2,id:4},{side:2,id:5},{side:2,id:4},{side:2,id:3},{side:2,id:2},{side:2,id:1}]
+];
+
+let board = null;
+let selected=null;
+let turnRed=true;
+let validMoves=[];
+let gameOver=false;
+let history=[];
+let isAiThinking = false; // AI正在走棋锁，防止重复点击
+let lastMove = null; // 上一步走子 {sr,sc,tr,tc}
+let inCheckSide = 0; // 被将军的一方：0=无, 1=黑, 2=红
+
+// ========== 皮卡鱼 WASM 引擎（本地浏览器运行，无需后端） ==========
+let pikafishEngine = null;
+let engineReady = false;
+let engineSkillLevel = 10; // Skill Level 0-20，全平台难度统一
+const ENGINE_MOVETIME = 1500; // 每步思考时间(ms)
+
+async function initPikafishEngine() {
+    infoDom.querySelector("div").innerText = "正在加载皮卡鱼引擎...";
+    try {
+        pikafishEngine = new PikafishEngine({
+            nnueUrl: 'pikafish.nnue',
+            wasmUrl: 'pikafish.js',
+            onInfo: (info) => {
+                // 思考中实时更新评估条
+                if (info.score !== undefined && info.scoreType === 'cp') {
+                    const s = (aiSideVal() === 1) ? -info.score : info.score;
+                    updateEvalFromScore(s);
+                }
+            }
+        });
+        await pikafishEngine.init();
+        pikafishEngine.setSkillLevel(engineSkillLevel);
+        engineReady = true;
+        infoDom.querySelector("div").innerText = "皮卡鱼引擎就绪，红方先行";
+        // 如果AI先手（玩家选黑方），启动AI
+        if (playerSide === 1 && !gameOver) aiMove();
+    } catch(e) {
+        console.error("皮卡鱼引擎初始化失败:", e);
+        infoDom.querySelector("div").innerText = "引擎加载失败，使用本地AI";
+    }
+}
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const boardWrap = document.getElementById("boardWrap");
+const infoDom = document.getElementById("info-bar");
+const restartBtn = document.getElementById("restartBtn");
+const undoBtn = document.getElementById("undoBtn");
+const cell=52;
+const ox=26,oy=26;
+
+function saveHistory(){
+    history.push({
+        board:JSON.parse(JSON.stringify(board)),
+        turnRed:turnRed,
+        gameOver:gameOver
+    })
+}
+
+function undo(){
+    if(history.length===0 || isAiThinking) return;
+    const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
+    // 玩家回合时撤销两步（玩家+AI），回到玩家上一步
+    if(isPlayerTurn && history.length >= 2){
+        history.pop();
+        positionHistory.pop();
+    }
+    let last = history.pop();
+    board = last.board;
+    turnRed = last.turnRed;
+    gameOver = last.gameOver;
+    positionHistory.pop();
+    zobristHash = computeHash();
+    selected=null;
+    validMoves=[];
+    lastMove=null;
+    updateCheckStatus();
+    infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+    drawBoard();
+    renderPieces();
+    updateEvaluation();
+}
+undoBtn.onclick = undo;
+
+function resetGame(){
+    // 停止引擎当前思考
+    if (pikafishEngine && engineReady) {
+        try { pikafishEngine.stop(); } catch(e){}
+    }
+    board = JSON.parse(JSON.stringify(initBoardData));
+    selected=null;
+    turnRed=true; // 红方先行
+    validMoves=[];
+    gameOver=false;
+    history=[];
+    positionHistory=[];
+    isAiThinking = false;
+    lastMove = null;
+    inCheckSide = 0;
+    zobristHash = computeHash();
+    infoDom.querySelector("div").innerText = "红方先行";
+    drawBoard();
+    renderPieces();
+    updateEvaluation();
+    // 玩家选黑方时，AI是红方，先走
+    if(playerSide === 1){
+        aiMove();
+    }
+}
+restartBtn.onclick = resetGame;
+
+// ========== AI: Minimax + Alpha-Beta + Quiescence + 长将检测 ==========
+const PIECE_VALUE = {1:1000, 2:450, 3:200, 4:200, 5:10000, 6:450, 7:100};
+let aiDepth = 4;
+let aiTimeLimit = 8000; // 迭代加深时间上限(ms)
+let positionHistory = []; // 局面历史，用于长将/重复检测
+let searchStartTime = 0;
+let playerSide = 2; // 玩家执子：2=红方, 1=黑方
+const aiSideVal = () => 3 - playerSide; // AI执子
+const boardFlipped = () => playerSide === 1; // 黑方在下时翻转棋盘
+function viewR(r){ return boardFlipped() ? 9 - r : r; }
+function viewC(c){ return boardFlipped() ? 8 - c : c; }
+
+document.getElementById("sideSelect").onchange = function(){
+    playerSide = parseInt(this.value);
+    resetGame();
+};
+
+document.getElementById("difficulty").onchange = function(){
+    engineSkillLevel = parseInt(this.value);
+    if (pikafishEngine && engineReady) {
+        pikafishEngine.setSkillLevel(engineSkillLevel);
+    }
+};
+
+// 局面序列化，用于重复检测
+function boardKey(){
+    let s = '';
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            s += board[r][c].side + '' + board[r][c].id;
+        }
+    }
+    return s;
+}
+
+function timeUp(){
+    return Date.now() - searchStartTime > aiTimeLimit + 500;
+}
+
+// ========== 实时局面评估条 ==========
+const evalRed = document.getElementById("eval-red");
+const evalBlack = document.getElementById("eval-black");
+const evalIndicator = document.getElementById("eval-indicator");
+const evalText = document.getElementById("eval-text");
+const MAX_EVAL = 1000; // 天天象棋标准：1000分≈一个车的优势
+
+function updateEvaluation(){
+    let evalScore = -evaluateBoard(); // 转为红方视角：正=红优，负=黑优
+    let clamped = Math.max(-MAX_EVAL, Math.min(MAX_EVAL, evalScore));
+    let pct = 50 + (clamped / MAX_EVAL) * 50;
+    evalRed.style.width = pct + "%";
+    evalBlack.style.width = (100 - pct) + "%";
+    evalIndicator.style.left = pct + "%";
+    let rounded = Math.round(evalScore);
+    if(Math.abs(rounded) < 8){
+        evalText.innerText = "均势";
+    }else if(rounded > 0){
+        evalText.innerText = "红方占优 " + rounded;
+    }else{
+        evalText.innerText = "黑方占优 " + (-rounded);
+    }
+}
+
+// ========== PST 棋子位置价值表（红方视角，row0=黑方底线，row9=红方底线）==========
+// 黑方使用时垂直翻转：row = 9 - r
+const PST_PAWN = [
+    [ 9, 9, 9,11,13,11, 9, 9, 9],
+    [19,24,34,40,40,40,34,24,19],
+    [ 7,12,16,18,18,18,16,12, 7],
+    [ 7,10,13,15,15,15,13,10, 7],
+    [ 5, 5, 5, 5, 5, 5, 5, 5, 5],
+    [ 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [ 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [ 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [ 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [ 0, 0, 0, 0, 0, 0, 0, 0, 0]
+];
+const PST_ROOK = [
+    [14,14,12,18,16,18,12,14,14],
+    [16,20,18,24,26,24,18,20,16],
+    [12,12,12,18,18,18,12,12,12],
+    [12,18,16,22,22,22,16,18,12],
+    [12,14,12,18,18,18,12,14,12],
+    [12,16,14,20,20,20,14,16,12],
+    [ 6,10, 8,14,14,14, 8,10, 6],
+    [ 4, 8, 6,14,12,14, 6, 8, 4],
+    [ 8, 4, 8,16, 8,16, 8, 4, 8],
+    [-2,10, 6,14,12,14, 6,10,-2]
+];
+const PST_HORSE = [
+    [ 4, 8,16,12, 4,12,16, 8, 4],
+    [ 4,10,28,16, 8,16,28,10, 4],
+    [12,14,16,20,18,20,16,14,12],
+    [ 8,24,18,24,20,24,18,24, 8],
+    [ 6,16,14,18,16,18,14,16, 6],
+    [ 4,12,16,14,12,14,16,12, 4],
+    [ 2, 6, 8, 6,10, 6, 8, 6, 2],
+    [ 4, 2, 6, 4, 4, 4, 6, 2, 4],
+    [ 0, 2, 4, 4, 4, 4, 4, 2, 0],
+    [ 0,-4, 0, 0, 0, 0, 0,-4, 0]
+];
+const PST_CANNON = [
+    [ 6, 4, 0,-10,-12,-10, 0, 4, 6],
+    [ 2, 2, 0, -4,-14, -4, 0, 2, 2],
+    [ 2, 2, 0,-10, -8,-10, 0, 2, 2],
+    [ 0, 0,-2,  4, 10,  4,-2, 0, 0],
+    [ 0, 0, 0,  2,  4,  2, 0, 0, 0],
+    [-2, 0, 4,  2,  6,  2, 4, 0,-2],
+    [ 0, 0, 0,  2,  4,  2, 0, 0, 0],
+    [ 4, 0, 8,  6, 10,  6, 8, 0, 4],
+    [ 0, 2, 4,  6,  6,  6, 4, 2, 0],
+    [ 0, 0, 2,  6,  6,  6, 2, 0, 0]
+];
+
+function getPST(pieceId, side, r, c){
+    // side=2红方直接查表；side=1黑方垂直翻转 row=9-r
+    let row = (side === 2) ? r : 9 - r;
+    if(pieceId === 7) return PST_PAWN[row][c];
+    if(pieceId === 1) return PST_ROOK[row][c];
+    if(pieceId === 2) return PST_HORSE[row][c];
+    if(pieceId === 6) return PST_CANNON[row][c];
+    return 0; // 士象将位置差异小，暂不加分
+}
+
+// 估值：基础子力 + 兵过河增值 + PST位置加成（天天象棋标准：1000=车）
+function evaluateBoard(){
+    let score = 0;
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            let p = board[r][c];
+            if(p.id===0) continue;
+            let val = PIECE_VALUE[p.id];
+            // 兵卒过河：基础100 → 200
+            if(p.id===7){
+                if(p.side===1 && r>4) val += 100;
+                if(p.side===2 && r<5) val += 100;
+            }
+            // PST位置加成
+            val += getPST(p.id, p.side, r, c);
+            if(p.side===1) score += val;
+            else score -= val;
+        }
+    }
+    return score;
+}
+
+// ========== Zobrist 哈希 & 置换表 ==========
+const ZOBRIST = [];
+const ZOBRIST_SIDE = (Math.random() * 0xFFFFFFFF) >>> 0;
+let zobristHash = 0;
+const transpositionTable = new Map();
+const TT_EXACT = 0, TT_LOWER = 1, TT_UPPER = 2;
+
+(function initZobrist(){
+    for(let id=0; id<=7; id++){
+        ZOBRIST[id] = [];
+        for(let side=0; side<=2; side++){
+            ZOBRIST[id][side] = new Uint32Array(90);
+            for(let pos=0; pos<90; pos++){
+                ZOBRIST[id][side][pos] = (Math.random() * 0xFFFFFFFF) >>> 0;
+            }
+        }
+    }
+})();
+
+function computeHash(){
+    let h = 0;
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            let p = board[r][c];
+            if(p.id !== 0) h ^= ZOBRIST[p.id][p.side][r*9+c];
+        }
+    }
+    if(!turnRed) h ^= ZOBRIST_SIDE; // 黑方走子时加入轮次标记
+    return h >>> 0;
+}
+
+function ttStore(hash, depth, score, flag, bestMove){
+    if(transpositionTable.size > 800000) transpositionTable.clear();
+    transpositionTable.set(hash, {depth, score, flag, bestMove});
+}
+
+// 快速走子，维护zobrist hash
+function makeMove(sr,sc,tr,tc){
+    let captured = board[tr][tc];
+    let moving = board[sr][sc];
+    zobristHash ^= ZOBRIST[moving.id][moving.side][sr*9+sc];
+    if(captured.id !== 0) zobristHash ^= ZOBRIST[captured.id][captured.side][tr*9+tc];
+    board[tr][tc] = moving;
+    board[sr][sc] = {side:0,id:0};
+    zobristHash ^= ZOBRIST[moving.id][moving.side][tr*9+tc];
+    zobristHash ^= ZOBRIST_SIDE; // 走子后轮次翻转
+    return captured;
+}
+
+function unmakeMove(sr,sc,tr,tc,captured){
+    let moving = board[tr][tc];
+    zobristHash ^= ZOBRIST[moving.id][moving.side][tr*9+tc];
+    if(captured.id !== 0) zobristHash ^= ZOBRIST[captured.id][captured.side][tr*9+tc];
+    board[sr][sc] = moving;
+    board[tr][tc] = captured;
+    zobristHash ^= ZOBRIST[moving.id][moving.side][sr*9+sc];
+    zobristHash ^= ZOBRIST_SIDE; // 撤销后轮次翻回
+}
+
+function generatePseudoMoves(side){
+    let moves=[];
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            let p=board[r][c];
+            if(p.id===0||p.side!==side) continue;
+            for(let tr=0;tr<10;tr++){
+                for(let tc=0;tc<9;tc++){
+                    if(canMoveRaw(r,c,tr,tc)){
+                        moves.push({sr:r,sc:c,tr:tr,tc:tc});
+                    }
+                }
+            }
+        }
+    }
+    return moves;
+}
+
+// MVV-LVA 排序：置换表最佳招法优先，然后吃子按"被吃子贵×10 - 攻击子便宜"排序
+function orderMoves(moves, ttMove){
+    return moves.sort((a,b)=>{
+        if(ttMove){
+            let aT = (a.sr===ttMove.sr&&a.sc===ttMove.sc&&a.tr===ttMove.tr&&a.tc===ttMove.tc)?1:0;
+            let bT = (b.sr===ttMove.sr&&b.sc===ttMove.sc&&b.tr===ttMove.tr&&b.tc===ttMove.tc)?1:0;
+            if(aT !== bT) return bT - aT;
+        }
+        let va = board[a.tr][a.tc].id!==0 ? PIECE_VALUE[board[a.tr][a.tc].id]*10 - PIECE_VALUE[board[a.sr][a.sc].id] : 0;
+        let vb = board[b.tr][b.tc].id!==0 ? PIECE_VALUE[board[b.tr][b.tc].id]*10 - PIECE_VALUE[board[b.sr][b.sc].id] : 0;
+        return vb - va;
+    });
+}
+
+// 统计大子数量，用于空着裁剪（残局关闭避免zugzwang）
+function countMajorPieces(side){
+    let count = 0;
+    for(let r=0;r<10;r++) for(let c=0;c<9;c++){
+        let p=board[r][c];
+        if(p.side===side && (p.id===1||p.id===2||p.id===6)) count++;
+    }
+    return count;
+}
+
+const NULL_R = 2;
+
+// 静态搜索
+function quiescence(alpha, beta, maximizing, qDepth){
+    if(timeUp() || qDepth > 6) return evaluateBoard();
+    let side = maximizing ? aiSideVal() : playerSide;
+    let inCheck = isInCheck(side);
+    let standPat = evaluateBoard();
+    if(maximizing){
+        if(standPat >= beta) return standPat;
+        if(standPat > alpha) alpha = standPat;
+    }else{
+        if(standPat <= alpha) return standPat;
+        if(standPat < beta) beta = standPat;
+    }
+    let moves = generatePseudoMoves(side);
+    let filtered = inCheck ? moves : moves.filter(m => board[m.tr][m.tc].id !== 0);
+    filtered = orderMoves(filtered, null);
+    for(let m of filtered){
+        let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
+        if(!isKingFaceToFace() && !isInCheck(side)){
+            let score = quiescence(alpha, beta, !maximizing, qDepth+1);
+            if(maximizing){
+                if(score >= beta){ unmakeMove(m.sr,m.sc,m.tr,m.tc,captured); return beta; }
+                if(score > alpha) alpha = score;
+            }else{
+                if(score <= alpha){ unmakeMove(m.sr,m.sc,m.tr,m.tc,captured); return alpha; }
+                if(score < beta) beta = score;
+            }
+        }
+        unmakeMove(m.sr,m.sc,m.tr,m.tc,captured);
+    }
+    return maximizing ? alpha : beta;
+}
+
+// Minimax + Alpha-Beta + 置换表 + 空着裁剪 + Check Extension
+function minimax(depth, alpha, beta, maximizing){
+    if(timeUp()) return evaluateBoard();
+    let alphaOrig = alpha;
+    let side = maximizing ? aiSideVal() : playerSide;
+
+    // 置换表查询
+    let tt = transpositionTable.get(zobristHash);
+    let ttMove = null;
+    if(tt){
+        if(tt.depth >= depth){
+            if(tt.flag === TT_EXACT) return tt.score;
+            if(tt.flag === TT_LOWER && tt.score >= beta) return tt.score;
+            if(tt.flag === TT_UPPER && tt.score <= alpha) return tt.score;
+        }
+        ttMove = tt.bestMove;
+    }
+
+    let inCheck = isInCheck(side);
+    if(depth === 0){
+        if(inCheck) depth = 1;
+        else return quiescence(alpha, beta, maximizing, 0);
+    }
+
+    // 空着裁剪
+    if(depth >= 3 && !inCheck && countMajorPieces(side) >= 3){
+        zobristHash ^= ZOBRIST_SIDE; // 空着：翻转轮次
+        let nullScore = minimax(depth - NULL_R - 1, beta - 1, beta, !maximizing);
+        zobristHash ^= ZOBRIST_SIDE; // 恢复轮次
+        if(nullScore >= beta){
+            ttStore(zobristHash, depth, beta, TT_LOWER, null);
+            return beta;
+        }
+    }
+
+    let moves = generatePseudoMoves(side);
+    moves = orderMoves(moves, ttMove);
+    let legalCount = 0;
+    let bestMove = null;
+
+    if(maximizing){
+        let maxEval = -Infinity;
+        for(let m of moves){
+            let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
+            if(!isKingFaceToFace() && !isInCheck(side)){
+                legalCount++;
+                let val = minimax(depth-1, alpha, beta, false);
+                if(val > maxEval){ maxEval = val; bestMove = m; }
+                alpha = Math.max(alpha, val);
+            }
+            unmakeMove(m.sr,m.sc,m.tr,m.tc,captured);
+            if(beta <= alpha) break;
+        }
+        if(legalCount===0){
+            let s = isInCheck(side) ? -99999 - depth : 0;
+            ttStore(zobristHash, depth, s, TT_EXACT, null);
+            return s;
+        }
+        let flag = (maxEval <= alphaOrig) ? TT_UPPER : (maxEval >= beta) ? TT_LOWER : TT_EXACT;
+        ttStore(zobristHash, depth, maxEval, flag, bestMove);
+        return maxEval;
+    }else{
+        let minEval = Infinity;
+        for(let m of moves){
+            let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
+            if(!isKingFaceToFace() && !isInCheck(side)){
+                legalCount++;
+                let val = minimax(depth-1, alpha, beta, true);
+                if(val < minEval){ minEval = val; bestMove = m; }
+                beta = Math.min(beta, val);
+            }
+            unmakeMove(m.sr,m.sc,m.tr,m.tc,captured);
+            if(beta <= alpha) break;
+        }
+        if(legalCount===0){
+            let s = isInCheck(side) ? 99999 + depth : 0;
+            ttStore(zobristHash, depth, s, TT_EXACT, null);
+            return s;
+        }
+        let flag = (minEval <= alphaOrig) ? TT_UPPER : (minEval >= beta) ? TT_LOWER : TT_EXACT;
+        ttStore(zobristHash, depth, minEval, flag, bestMove);
+        return minEval;
+    }
+}
+
+// 搜索指定深度的最佳招法
+function searchBestMove(depth, prevBest){
+    const asv = aiSideVal();
+    let moves = generatePseudoMoves(asv);
+    if(moves.length===0) return null;
+    if(prevBest){
+        moves = moves.filter(m =>
+            !(m.sr===prevBest.sr&&m.sc===prevBest.sc&&m.tr===prevBest.tr&&m.tc===prevBest.tc));
+        moves.unshift(prevBest);
+    }
+    moves = orderMoves(moves, null);
+    let bestMove = null;
+    let bestScore = -Infinity;
+    let alpha = -Infinity;
+    let beta = Infinity;
+    for(let m of moves){
+        let captured = makeMove(m.sr,m.sc,m.tr,m.tc);
+        if(!isKingFaceToFace() && !isInCheck(asv)){
+            let key = boardKey();
+            let isChecking = isInCheck(playerSide);
+            let isRepeat = positionHistory.includes(key);
+            let score = (isRepeat && isChecking) ? -99999 : minimax(depth-1, alpha, beta, false);
+            if(score > bestScore){ bestScore = score; bestMove = m; }
+            alpha = Math.max(alpha, score);
+        }
+        unmakeMove(m.sr,m.sc,m.tr,m.tc,captured);
+        if(timeUp()) break;
+    }
+    return bestMove;
+}
+
+// 迭代加深：在时间限制内尽可能深搜
+function findBestMove(){
+    searchStartTime = Date.now();
+    zobristHash = computeHash(); // 确保哈希与当前局面同步
+    transpositionTable.clear();
+    let bestMove = null;
+    let depth = 1;
+    let maxDepth = aiDepth + 4;
+    while(depth <= maxDepth && !timeUp()){
+        let move = searchBestMove(depth, bestMove);
+        if(move) bestMove = move;
+        depth++;
+    }
+    return bestMove;
+}
+
+// ========== 皮卡鱼引擎接入 ==========
+let lastEngineScore = null; // 引擎返回的红方视角评分
+
+// 棋盘转FEN（中国象棋UCI标准）
+function boardToFEN(){
+    const pieceMap = {1:'r',2:'n',3:'b',4:'a',5:'k',6:'c',7:'p'};
+    let fen = '';
+    for(let r=0;r<10;r++){
+        let empty = 0;
+        for(let c=0;c<9;c++){
+            let p = board[r][c];
+            if(p.id === 0){ empty++; }
+            else {
+                if(empty > 0){ fen += empty; empty = 0; }
+                let ch = pieceMap[p.id] || '?';
+                if(p.side === 2) ch = ch.toUpperCase();
+                fen += ch;
+            }
+        }
+        if(empty > 0) fen += empty;
+        if(r < 9) fen += '/';
+    }
+    fen += turnRed ? ' w - - 0 1' : ' b - - 0 1';
+    return fen;
+}
+
+// 解析皮卡鱼UCI走法（如 "h2e2" → 棋盘坐标）
+// 注意：UCI行号从红方底线数0-9，棋盘行号从黑方底线数0-9，需翻转
+function parsePikafishMove(moveStr){
+    return {
+        sc: moveStr.charCodeAt(0) - 97,
+        sr: 9 - parseInt(moveStr[1]),
+        tc: moveStr.charCodeAt(2) - 97,
+        tr: 9 - parseInt(moveStr[3])
+    };
+}
+
+// 用引擎评分更新评估条（红方视角）
+function updateEvalFromScore(score){
+    let clamped = Math.max(-MAX_EVAL, Math.min(MAX_EVAL, score));
+    let pct = 50 + (clamped / MAX_EVAL) * 50;
+    evalRed.style.width = pct + "%";
+    evalBlack.style.width = (100 - pct) + "%";
+    evalIndicator.style.left = pct + "%";
+    let rounded = Math.round(score);
+    if(Math.abs(rounded) < 8){ evalText.innerText = "均势"; }
+    else if(rounded > 0){ evalText.innerText = "红方占优 " + rounded; }
+    else { evalText.innerText = "黑方占优 " + (-rounded); }
+}
+
+// AI走棋：皮卡鱼 WASM 引擎（本地浏览器运行），失败降级本地AI
+async function aiMove(){
+    const isAiTurn = turnRed ? (playerSide===1) : (playerSide===2);
+    if(gameOver || !isAiTurn || isAiThinking) return;
+    isAiThinking = true;
+    infoDom.querySelector("div").innerText = "皮卡鱼思考中...";
+
+    let moveData = null;
+    let engineScore = null;
+
+    if (engineReady && pikafishEngine) {
+        try {
+            let fen = boardToFEN();
+            let bestmove = await pikafishEngine.go(fen, ENGINE_MOVETIME);
+            if (bestmove && bestmove !== '(none)') {
+                moveData = parsePikafishMove(bestmove);
+            }
+        } catch(e) {
+            console.log("皮卡鱼出错，降级本地AI:", e);
+        }
+    }
+
+    if(!moveData){
+        // 降级：本地 minimax AI
+        moveData = findBestMove();
+        engineScore = null;
+    }
+
+    if(moveData){
+        saveHistory();
+        animateMove(moveData.sr, moveData.sc, moveData.tr, moveData.tc, () => {
+            finishMove(moveData, engineScore);
+        });
+    } else {
+        isAiThinking = false;
+        infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+    }
+}
+
+function getAllLegalMoves(side){
+    let moves=[];
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            let p=board[r][c];
+            if(p.id===0 || p.side!==side) continue;
+            let pieceMoves = getAllValid(r,c);
+            for(let m of pieceMoves){
+                moves.push({sr:r,sc:c,tr:m.r,tc:m.c});
+            }
+        }
+    }
+    return moves;
+}
+
+function checkGameEnd(){
+    let currentSide = turnRed ? 2 : 1;
+    let moves = getAllLegalMoves(currentSide);
+    if(moves.length>0) return;
+
+    gameOver=true;
+    let isCheck = isInCheck(currentSide);
+    if(isCheck){
+        if(turnRed){
+            alert("红方被将死，黑方胜利！");
+        }else{
+            alert("黑方被将死，红方胜利！");
+        }
+    }else{
+        if(turnRed){
+            alert("红方困毙，黑方胜利！");
+        }else{
+            alert("黑方困毙，红方胜利！");
+        }
+    }
+    infoDom.querySelector("div").innerText = "游戏结束";
+}
+
+canvas.onclick = function(e){
+    if(gameOver || isAiThinking) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    let c = Math.round((mx - ox)/cell);
+    let r = Math.round((my - oy)/cell);
+    if(boardFlipped()){ r = 9 - r; c = 8 - c; }
+    if(c>=0&&c<=8&&r>=0&&r<=9){
+        handleClick(r,c);
+    }
+}
+
+function handleClick(r,c){
+    if(gameOver || isAiThinking) return;
+    const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
+    if(!isPlayerTurn) return;
+    const piece = board[r][c];
+    if(selected === null){
+        if(piece.id!==0 && piece.side===playerSide){
+            selected={r,c};
+            validMoves=getAllValid(r,c);
+        }
+        drawBoard();
+        renderPieces();
+        return;
+    }
+    const sr=selected.r;
+    const sc=selected.c;
+    if(sr===r&&sc===c){
+        selected=null;
+        validMoves=[];
+        drawBoard();
+        renderPieces();
+        return;
+    }
+    if(simulateMove(sr,sc,r,c)){
+        saveHistory();
+        selected=null;
+        validMoves=[];
+        animateMove(sr, sc, r, c, () => {
+            board[r][c] = {...board[sr][sc]};
+            board[sr][sc] = {side:0,id:0};
+            turnRed=!turnRed;
+            positionHistory.push(boardKey());
+            lastMove = {sr,sc,tr:r,tc:c};
+            updateCheckStatus();
+            updateEvaluation();
+            checkGameEnd();
+            if(!gameOver){
+                infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+                aiMove();
+            }else{
+                infoDom.querySelector("div").innerText = "游戏结束";
+            }
+            drawBoard();
+            renderPieces();
+        });
+        return;
+    }
+    // 走法不合法，取消选中
+    selected=null;
+    validMoves=[];
+    drawBoard();
+    renderPieces();
+}
+
+function click(r,c){
+    handleClick(r,c);
+}
+
+function drawBoard(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle="#5c3010";
+    ctx.lineWidth=2;
+
+    for(let i=0;i<10;i++){
+        ctx.beginPath();
+        ctx.moveTo(ox, oy + i*cell);
+        ctx.lineTo(ox+8*cell, oy + i*cell);
+        ctx.stroke();
+    }
+
+    for(let i=0;i<9;i++){
+        ctx.beginPath();
+        ctx.moveTo(ox+i*cell, oy);
+        ctx.lineTo(ox+i*cell, oy + 4*cell);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(ox+i*cell, oy +5*cell);
+        ctx.lineTo(ox+i*cell, oy+9*cell);
+        ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(ox+3*cell, oy+0*cell);
+    ctx.lineTo(ox+5*cell, oy+2*cell);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ox+5*cell, oy+0*cell);
+    ctx.lineTo(ox+3*cell, oy+2*cell);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(ox+3*cell, oy+7*cell);
+    ctx.lineTo(ox+5*cell, oy+9*cell);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ox+5*cell, oy+7*cell);
+    ctx.lineTo(ox+3*cell, oy+9*cell);
+    ctx.stroke();
+
+    ctx.font="26px SimHei";
+    ctx.fillStyle="#5c3010";
+    ctx.fillText("楚河", ox+1.2*cell, oy+4.5*cell);
+    ctx.fillText("汉界", ox+5.4*cell, oy+4.5*cell);
+
+    ctx.fillStyle="rgba(0,120,255,0.45)";
+    for(let m of validMoves){
+        let x=ox+viewC(m.c)*cell;
+        let y=oy+viewR(m.r)*cell;
+        ctx.beginPath();
+        ctx.arc(x,y,11,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function getPieceName(side,id){
+    if(id===1) return "车";
+    if(id===2) return "马";
+    if(id===3) return side===1?"象":"相";
+    if(id===4) return "士";
+    if(id===5){
+        if(side===1) return "将";
+        else return "帅";
+    }
+    if(id===6) return "炮";
+    if(id===7){
+        if(side===1) return "卒";
+        else return "兵";
+    }
+    return "";
+}
+
+function renderPieces(){
+    document.querySelectorAll(".piece").forEach(p=>p.remove());
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            const item = board[r][c];
+            if(item.id===0) continue;
+            const div=document.createElement("div");
+            div.className = item.side===2 ? "piece piece-red" : "piece piece-black";
+            div.innerText = getPieceName(item.side, item.id);
+            div.style.left = (ox + viewC(c)*cell - 23) + "px";
+            div.style.top = (oy + viewR(r)*cell - 23) + "px";
+            div.dataset.pos = r + "_" + c;
+            div.onclick = ()=>click(r,c);
+            if(selected && selected.r===r && selected.c===c){
+                div.classList.add("selected");
+            }
+            // 将军特效：被将军的将/帅红色脉冲
+            if(item.id===5 && inCheckSide===item.side){
+                div.classList.add("in-check");
+            }
+            // 上一步走子高亮
+            if(lastMove){
+                if(lastMove.sr===r && lastMove.sc===c) div.classList.add("last-move-from");
+                if(lastMove.tr===r && lastMove.tc===c) div.classList.add("last-move-to");
+            }
+            boardWrap.appendChild(div);
+        }
+    }
+}
+
+// ========== 走子动画 & 特效 ==========
+function animateMove(sr, sc, tr, tc, onDone){
+    const movingEl = document.querySelector(`.piece[data-pos="${sr}_${sc}"]`);
+    const targetEl = document.querySelector(`.piece[data-pos="${tr}_${tc}"]`);
+    const tx = (ox + viewC(tc)*cell - 23) + "px";
+    const ty = (oy + viewR(tr)*cell - 23) + "px";
+    if(targetEl) targetEl.classList.add("captured");
+    if(movingEl){
+        movingEl.style.zIndex = "20";
+        movingEl.style.left = tx;
+        movingEl.style.top = ty;
+    }
+    setTimeout(() => { if(onDone) onDone(); }, 300);
+}
+
+function updateCheckStatus(){
+    const currentSide = turnRed ? 2 : 1;
+    inCheckSide = isInCheck(currentSide) ? currentSide : 0;
+}
+
+// AI走子后的统一收尾（更新数据+渲染+评估）
+function finishMove(moveData, engineScore){
+    board[moveData.tr][moveData.tc] = {...board[moveData.sr][moveData.sc]};
+    board[moveData.sr][moveData.sc] = {side:0,id:0};
+    turnRed = !turnRed;
+    positionHistory.push(boardKey());
+    lastMove = {sr:moveData.sr, sc:moveData.sc, tr:moveData.tr, tc:moveData.tc};
+    updateCheckStatus();
+    checkGameEnd();
+    isAiThinking = false;
+    if(!gameOver) infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+    else infoDom.querySelector("div").innerText = "游戏结束";
+    drawBoard();
+    renderPieces();
+    if(engineScore !== null && engineScore !== undefined){
+        lastEngineScore = (aiSideVal() === 1) ? -engineScore : engineScore;
+        updateEvalFromScore(lastEngineScore);
+    } else {
+        lastEngineScore = null;
+        updateEvaluation();
+    }
+}
+
+function inBoard(r,c){
+    return r>=0&&r<=9&&c>=0&&c<=8;
+}
+
+function countBlock(sr,sc,tr,tc){
+    let cnt=0;
+    if(sr===tr){
+        let minc=Math.min(sc,tc),maxc=Math.max(sc,tc);
+        for(let c=minc+1;c<maxc;c++){
+            if(board[sr][c].id!==0) cnt++;
+        }
+    }else if(sc===tc){
+        let minr=Math.min(sr,tr),maxr=Math.max(sr,tr);
+        for(let r=minr+1;r<maxr;r++){
+            if(board[r][sc].id!==0) cnt++;
+        }
+    }
+    return cnt;
+}
+
+function canMoveRaw(sr,sc,tr,tc){
+    if(!inBoard(tr,tc)) return false;
+    const s=board[sr][sc];
+    const t=board[tr][tc];
+    if(t.id!==0 && t.side===s.side) return false;
+    const id=s.id;
+    const side=s.side;
+
+    if(id===1){
+        if(sr!==tr&&sc!==tc) return false;
+        return countBlock(sr,sc,tr,tc)===0;
+    }
+    if(id===2){
+        const dr=tr-sr;
+        const dc=tc-sc;
+        let ok=false;
+        let blockR,blockC;
+        if(dr===-2&&dc===-1){ok=true;blockR=sr-1;blockC=sc;}
+        else if(dr===-2&&dc===1){ok=true;blockR=sr-1;blockC=sc;}
+        else if(dr===-1&&dc===-2){ok=true;blockR=sr;blockC=sc-1;}
+        else if(dr===-1&&dc===2){ok=true;blockR=sr;blockC=sc+1;}
+        else if(dr===1&&dc===-2){ok=true;blockR=sr;blockC=sc-1;}
+        else if(dr===1&&dc===2){ok=true;blockR=sr;blockC=sc+1;}
+        else if(dr===2&&dc===-1){ok=true;blockR=sr+1;blockC=sc;}
+        else if(dr===2&&dc===1){ok=true;blockR=sr+1;blockC=sc;}
+        if(!ok) return false;
+        return board[blockR][blockC].id===0;
+    }
+    if(id===3){
+        const dr=Math.abs(tr-sr);
+        const dc=Math.abs(tc-sc);
+        if(dr!==2||dc!==2) return false;
+        const er=(sr+tr)/2;
+        const ec=(sc+tc)/2;
+        if(board[er][ec].id!==0) return false;
+        if(side===1 && tr>4) return false;
+        if(side===2 && tr<5) return false;
+        return true;
+    }
+    if(id===4){
+        const dr=Math.abs(tr-sr);
+        const dc=Math.abs(tc-sc);
+        if(dr!==1||dc!==1) return false;
+        if(side===1){
+            if(tr<0||tr>2||tc<3||tc>5) return false;
+        }else{
+            if(tr<7||tr>9||tc<3||tc>5) return false;
+        }
+        return true;
+    }
+    if(id===5){
+        const dr=Math.abs(tr-sr);
+        const dc=Math.abs(tc-sc);
+        if(!((dr===1&&dc===0)||(dr===0&&dc===1))) return false;
+        if(side===1){
+            if(tr<0||tr>2||tc<3||tc>5) return false;
+        }else{
+            if(tr<7||tr>9||tc<3||tc>5) return false;
+        }
+        return true;
+    }
+    if(id===6){
+        if(sr!==tr&&sc!==tc) return false;
+        const blk=countBlock(sr,sc,tr,tc);
+        if(t.id===0){
+            return blk===0;
+        }else{
+            return blk===1;
+        }
+    }
+    if(id===7){
+        const dr=tr-sr;
+        const dc=tc-sc;
+        if(side===1){
+            if(sr<=4){
+                if(dr!==1||dc!==0) return false;
+            }else{
+                if(!((dr===1&&dc===0)||(dr===0&&Math.abs(dc)===1))) return false;
+            }
+        }else{
+            if(sr>=5){
+                if(dr!==-1||dc!==0) return false;
+            }else{
+                if(!((dr===-1&&dc===0)||(dr===0&&Math.abs(dc)===1))) return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+function findKing(side){
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            if(board[r][c].id===5 && board[r][c].side===side){
+                return {r,c};
+            }
+        }
+    }
+    return null;
+}
+
+function isKingFaceToFace(){
+    let bk=findKing(1);
+    let rk=findKing(2);
+    if(!bk||!rk) return false;
+    if(bk.c!==rk.c) return false;
+    return countBlock(bk.r,bk.c,rk.r,rk.c)===0;
+}
+
+function isInCheck(side){
+    let king=findKing(side);
+    if(!king) return false;
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            let p=board[r][c];
+            if(p.id===0||p.side===side) continue;
+            if(canMoveRaw(r,c,king.r,king.c)){
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function simulateMove(sr,sc,tr,tc){
+    if(!canMoveRaw(sr,sc,tr,tc)) return false;
+    let bak=JSON.parse(JSON.stringify(board));
+    board[tr][tc]={...board[sr][sc]};
+    board[sr][sc]={side:0,id:0};
+    let ok=true;
+    if(isKingFaceToFace() || isInCheck(board[tr][tc].side)){
+        ok=false;
+    }
+    board=bak;
+    return ok;
+}
+
+function getAllValid(sr,sc){
+    let res=[];
+    for(let r=0;r<10;r++){
+        for(let c=0;c<9;c++){
+            if(simulateMove(sr,sc,r,c)){
+                res.push({r,c});
+            }
+        }
+    }
+    return res;
+}
+
+resetGame();
+initPikafishEngine();
+</script>
+</body>
+</html>
