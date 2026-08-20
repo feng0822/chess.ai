@@ -52,6 +52,23 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
 #eval-black{position:absolute;right:0;top:0;height:100%;background:#1a1a1a;width:50%;transition:width 0.4s ease;}
 #eval-indicator{position:absolute;top:-3px;bottom:-3px;width:3px;background:#fff;left:50%;transform:translateX(-50%);z-index:5;transition:left 0.4s ease;box-shadow:0 0 4px rgba(0,0,0,0.6);}
 #eval-text{text-align:center;font-size:14px;margin-top:4px;color:#3a2010;}
+/* 加载遮罩 */
+#loading-overlay{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(240,226,203,0.96);z-index:9999;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    transition:opacity 0.5s ease;
+}
+#loading-overlay.hidden{opacity:0;pointer-events:none;}
+#loading-title{font-size:22px;color:#5c3010;margin-bottom:12px;font-weight:bold;}
+#loading-subtitle{font-size:13px;color:#7a5030;margin-bottom:24px;text-align:center;max-width:340px;line-height:1.6;}
+#progress-bar-wrap{width:320px;height:26px;background:#d4b896;border-radius:13px;overflow:hidden;border:2px solid #703810;box-shadow:inset 0 1px 3px rgba(0,0,0,0.2);}
+#progress-bar{height:100%;background:linear-gradient(90deg,#c40000,#e85050);width:0%;transition:width 0.25s ease;}
+#progress-text{font-size:14px;color:#5c3010;margin-top:12px;font-weight:bold;}
+#loading-fallback{margin-top:24px;display:none;}
+#loading-fallback button{padding:9px 22px;font-size:14px;background:#703810;color:#f0e2cb;border:none;border-radius:4px;cursor:pointer;}
+#loading-fallback button:hover{background:#8a4818;}
+#loading-status{font-size:13px;color:#8a6040;margin-top:8px;min-height:18px;}
 </style>
 </head>
 <body>
@@ -86,6 +103,16 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
 <div id="boardWrap">
 <canvas id="canvas" width="468" height="520"></canvas>
 </div>
+<div id="loading-overlay">
+    <div id="loading-title">正在加载象棋 AI 引擎</div>
+    <div id="loading-subtitle">首次加载需下载约 50MB 神经网络文件，建议在 WiFi 环境下访问，后续打开会使用浏览器缓存</div>
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+    <div id="progress-text">准备中...</div>
+    <div id="loading-status"></div>
+    <div id="loading-fallback">
+        <button id="fallback-btn">网络较慢？使用本地 AI 对弈</button>
+    </div>
+</div>
 <script src="pikafish-engine.js"></script>
 <script>
 const initBoardData = [
@@ -119,12 +146,29 @@ const ENGINE_MOVETIME = 1500; // 每步思考时间(ms)
 
 async function initPikafishEngine() {
     infoDom.querySelector("div").innerText = "正在加载皮卡鱼引擎...";
+    loadingStatus.innerText = "初始化 Web Worker...";
+    // 3秒后若仍未加载完成，显示降级入口
+    const fallbackTimer = setTimeout(() => {
+        if (!engineReady) loadingFallback.style.display = "block";
+    }, 3000);
     try {
         pikafishEngine = new PikafishEngine({
             nnueUrl: 'pikafish.nnue',
             wasmUrl: 'worker.js',
             onProgress: (text) => {
                 infoDom.querySelector("div").innerText = text;
+                loadingStatus.innerText = text;
+            },
+            onDownloadProgress: (loaded, total, percent) => {
+                if (total > 0) {
+                    progressBar.style.width = percent + "%";
+                    const mb = (loaded / 1048576).toFixed(1);
+                    const totalMb = (total / 1048576).toFixed(0);
+                    progressText.innerText = percent + "%  (" + mb + " / " + totalMb + " MB)";
+                } else {
+                    const mb = (loaded / 1048576).toFixed(1);
+                    progressText.innerText = "已下载 " + mb + " MB...";
+                }
             },
             onInfo: (info) => {
                 // 思考中实时更新评估条
@@ -135,13 +179,24 @@ async function initPikafishEngine() {
             }
         });
         await pikafishEngine.init();
+        clearTimeout(fallbackTimer);
+        if (engineLoadCancelled) return;
         pikafishEngine.setSkillLevel(engineSkillLevel);
         engineReady = true;
+        progressBar.style.width = "100%";
+        progressText.innerText = "加载完成！";
         infoDom.querySelector("div").innerText = "皮卡鱼引擎就绪，红方先行";
+        setTimeout(hideLoadingOverlay, 400);
         // 如果AI先手（玩家选黑方），启动AI
         if (playerSide === 1 && !gameOver) aiMove();
     } catch(e) {
+        clearTimeout(fallbackTimer);
+        if (engineLoadCancelled) return;
         console.error("皮卡鱼引擎初始化失败:", e);
+        progressText.innerText = "加载失败";
+        loadingStatus.innerText = e.message;
+        loadingFallback.style.display = "block";
+        fallbackBtn.innerText = "使用本地 AI 对弈";
         infoDom.querySelector("div").innerText = "引擎加载失败: " + e.message + "（使用本地AI）";
     }
 }
@@ -152,6 +207,28 @@ const boardWrap = document.getElementById("boardWrap");
 const infoDom = document.getElementById("info-bar");
 const restartBtn = document.getElementById("restartBtn");
 const undoBtn = document.getElementById("undoBtn");
+// 加载遮罩元素
+const loadingOverlay = document.getElementById("loading-overlay");
+const progressBar = document.getElementById("progress-bar");
+const progressText = document.getElementById("progress-text");
+const loadingStatus = document.getElementById("loading-status");
+const loadingFallback = document.getElementById("loading-fallback");
+const fallbackBtn = document.getElementById("fallback-btn");
+let engineLoadCancelled = false;
+
+function hideLoadingOverlay() {
+    loadingOverlay.classList.add("hidden");
+    setTimeout(() => { loadingOverlay.style.display = "none"; }, 500);
+}
+
+fallbackBtn.onclick = function() {
+    engineLoadCancelled = true;
+    if (pikafishEngine) {
+        try { pikafishEngine.quit(); } catch(e) {}
+    }
+    hideLoadingOverlay();
+    infoDom.querySelector("div").innerText = "已使用本地 AI（皮卡鱼引擎未加载）";
+};
 const cell=52;
 const ox=26,oy=26;
 

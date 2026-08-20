@@ -10,7 +10,8 @@ class PikafishEngine {
         this.wasmUrl = options.wasmUrl || 'worker.js';
         this.onInfo = options.onInfo || null;
         this.onBestMove = options.onBestMove || null;
-        this.onProgress = options.onProgress || null; // 进度回调
+        this.onProgress = options.onProgress || null; // 文字进度回调
+        this.onDownloadProgress = options.onDownloadProgress || null; // 下载进度回调(loaded, total, percent)
         this._uciReady = false;
         this._resolveQueue = [];
         this._bestMove = null;
@@ -87,9 +88,11 @@ class PikafishEngine {
                     const mb = (loaded / 1048576).toFixed(1);
                     const totalMb = (total / 1048576).toFixed(0);
                     this._progress(`下载 NNUE: ${mb}/${totalMb}MB (${pct}%)`);
+                    if (this.onDownloadProgress) this.onDownloadProgress(loaded, parseInt(total), pct);
                 } else {
                     const mb = (loaded / 1048576).toFixed(1);
                     this._progress(`下载 NNUE: ${mb}MB...`);
+                    if (this.onDownloadProgress) this.onDownloadProgress(loaded, 0, 0);
                 }
             }
             const buffer = new Uint8Array(loaded);
