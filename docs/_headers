@@ -1,0 +1,32 @@
+# Netlify / Cloudflare Pages 响应头配置（发布目录设为 docs 时自动生效）
+# 文档：https://docs.netlify.com/routing/headers/  /  https://developers.cloudflare.com/pages/configuration/headers/
+
+# 神经网络打包文件与 WASM 引擎：内容不可变，一年强缓存（节省重复下载）
+/data/*.data
+  Cache-Control: public, max-age=31536000, immutable
+/*.wasm
+  Cache-Control: public, max-age=31536000, immutable
+
+# 引擎胶水与封装脚本：长期缓存
+/worker.js
+  Cache-Control: public, max-age=31536000, immutable
+/pikafish.js
+  Cache-Control: public, max-age=31536000, immutable
+/pikafish-engine.js
+  Cache-Control: public, max-age=31536000, immutable
+
+# Service Worker 必须每次校验，否则版本更新无法及时下发
+/sw.js
+  Cache-Control: no-cache
+
+# HTML 入口不缓存，保证用户总能拿到最新页面
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+
+# 通用安全响应头
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin

@@ -1,24 +1,26 @@
 /**
  * PikafishEngine - 皮卡鱼 WASM 前端封装
- * AI 运算全部在浏览器本地 Worker 中执行，无需后端服务器
+ * AI 运算全部在浏览器本地 Worker 中执行，无需后端服务器。
+ * 神经网络已随引擎打包（data/pikafish.data，约 4MB），由 Worker 自动加载。
  */
 class PikafishEngine {
     constructor(options = {}) {
         this.worker = null;
         this.ready = false;
-        this.nnueUrl = options.nnueUrl || 'pikafish.nnue';
         this.wasmUrl = options.wasmUrl || 'worker.js';
         this.onInfo = options.onInfo || null;
         this.onBestMove = options.onBestMove || null;
         this.onProgress = options.onProgress || null; // 文字进度回调
-        this.onDownloadProgress = options.onDownloadProgress || null; // 下载进度回调(loaded, total, percent)
+        this.onDownloadProgress = options.onDownloadProgress || null; // 兼容旧接口（本版由 status 驱动）
         this._uciReady = false;
         this._resolveQueue = [];
         this._bestMove = null;
-        this._infoBuffer = [];
+        // 皮卡鱼无 "Skill Level" 选项，用搜索深度区分五档强度
+        this.searchDepth = 10;
     }
 
     _progress(text) {
+        if (!text) return;
         console.log('[Pikafish]', text);
         if (this.onProgress) this.onProgress(text);
     }
@@ -28,34 +30,32 @@ class PikafishEngine {
             this._progress('创建 Worker...');
             this.worker = new Worker(this.wasmUrl);
 
-            // 超时：NNUE 49MB 可能下载较慢，给 5 分钟
+            // 引擎+网络约 4MB，正常数秒内就绪；60 秒超时兜底
             const timeout = setTimeout(() => {
-                reject(new Error('初始化超时（请检查网络，NNUE 49MB 下载可能较慢）'));
-            }, 300000);
+                reject(new Error('初始化超时（网络较慢时请稍后重试，或改用本地 AI）'));
+            }, 60000);
 
             this.worker.onmessage = (e) => {
                 const msg = e.data;
-                if (msg.type === 'module_ready') {
-                    this._progress('WASM 初始化完成，开始下载 NNUE...');
-                    this._loadNnue();
-                } else if (msg.type === 'nnue_loaded') {
-                    this._progress('NNUE 加载完成，引擎启动中...');
-                    // uci 命令已在 Worker 中预写入 stdin，直接等待 uciok
-                } else if (msg.type === 'worker_error') {
-                    clearTimeout(timeout);
-                    reject(new Error('Worker内部错误: ' + msg.data));
-                } else if (msg.type === 'stdout') {
+                if (msg.type === 'stdout') {
                     this._handleStdout(msg.data);
                 } else if (msg.type === 'stderr') {
                     console.warn('[Pikafish stderr]', msg.data);
+                } else if (msg.type === 'status') {
+                    // 引擎加载状态（如 Running...），仅作进度提示
+                    if (msg.data) this._progress('引擎加载中...');
+                } else if (msg.type === 'worker_error') {
+                    clearTimeout(timeout);
+                    reject(new Error('Worker内部错误: ' + msg.data));
                 }
             };
 
             this.worker.onerror = (err) => {
                 clearTimeout(timeout);
-                reject(new Error('Worker错误: ' + err.message + ' (文件名:' + err.filename + ':' + err.lineno + ')'));
+                reject(new Error('Worker错误: ' + err.message + ' (文件:' + err.filename + ':' + err.lineno + ')'));
             };
 
+            // uci 由 Worker 在引擎就绪后自动发送，这里等待 uciok → isready → readyok
             this._waitFor('uciok').then(() => {
                 this._progress('UCI 握手完成，等待引擎就绪...');
                 this._uciReady = true;
@@ -68,45 +68,6 @@ class PikafishEngine {
                 resolve();
             }).catch(reject);
         });
-    }
-
-    async _loadNnue() {
-        try {
-            const resp = await fetch(this.nnueUrl);
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const total = resp.headers.get('content-length');
-            let loaded = 0;
-            const reader = resp.body.getReader();
-            const chunks = [];
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                loaded += value.length;
-                if (total) {
-                    const pct = Math.round(loaded / total * 100);
-                    const mb = (loaded / 1048576).toFixed(1);
-                    const totalMb = (total / 1048576).toFixed(0);
-                    this._progress(`下载 NNUE: ${mb}/${totalMb}MB (${pct}%)`);
-                    if (this.onDownloadProgress) this.onDownloadProgress(loaded, parseInt(total), pct);
-                } else {
-                    const mb = (loaded / 1048576).toFixed(1);
-                    this._progress(`下载 NNUE: ${mb}MB...`);
-                    if (this.onDownloadProgress) this.onDownloadProgress(loaded, 0, 0);
-                }
-            }
-            const buffer = new Uint8Array(loaded);
-            let offset = 0;
-            for (const chunk of chunks) {
-                buffer.set(chunk, offset);
-                offset += chunk.length;
-            }
-            this._progress('NNUE 下载完成，发送给引擎...');
-            this.worker.postMessage({ type: 'nnue', data: buffer.buffer }, [buffer.buffer]);
-        } catch (e) {
-            console.error('NNUE加载失败:', e);
-            throw e;
-        }
     }
 
     _handleStdout(line) {
@@ -160,9 +121,14 @@ class PikafishEngine {
         }
     }
 
+    // 皮卡鱼不支持 Stockfish 的 Skill Level，改用搜索深度控制强度
     setSkillLevel(level) {
-        level = Math.max(0, Math.min(20, level));
-        this._send(`setoption name Skill Level value ${level}`);
+        level = Math.max(0, Math.min(20, level | 0));
+        if (level <= 3) this.searchDepth = 4;        // 入门
+        else if (level <= 7) this.searchDepth = 7;  // 业余
+        else if (level <= 11) this.searchDepth = 10;
+        else if (level <= 15) this.searchDepth = 14;
+        else this.searchDepth = 20;                 // 大师
     }
 
     async go(fen, movetime = 1000) {
@@ -170,7 +136,8 @@ class PikafishEngine {
         this._bestMove = null;
         this._send('ucinewgame');
         this._send(`position fen ${fen}`);
-        this._send(`go movetime ${movetime}`);
+        // 同时给出深度与时间上限，任一达到即停止，兼顾强度档位与响应速度
+        this._send(`go depth ${this.searchDepth} movetime ${movetime}`);
         await this._waitFor('bestmove');
         return this._bestMove;
     }

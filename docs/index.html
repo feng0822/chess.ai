@@ -2,23 +2,37 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>中国象棋</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>中国象棋 AI 对弈 - 皮卡鱼引擎在线人机对战</title>
+<meta name="description" content="纯前端中国象棋人机对弈网站，内置皮卡鱼 Pikafish NNUE 神经网络引擎，浏览器本地运行无需后端，支持五档难度、悔棋、实时局面评估。">
+<meta name="theme-color" content="#703810">
+<meta property="og:type" content="website">
+<meta property="og:title" content="中国象棋 AI 对弈">
+<meta property="og:description" content="内置皮卡鱼 Pikafish 引擎的在线中国象棋人机对弈，五档难度，浏览器本地运行，打开即玩。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%23fff8f8' stroke='%23222' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='24' fill='none' stroke='%23c40000' stroke-width='2'/%3E%3Ctext x='32' y='45' font-size='34' text-anchor='middle' fill='%23c40000' font-family='SimHei,Microsoft YaHei,sans-serif' font-weight='bold'%3E%E5%B8%85%3C/text%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:"SimHei","Microsoft YaHei"}
-body{background:#f0e2cb;display:flex;flex-direction:column;align-items:center;padding:14px}
-#info-bar{margin-bottom:8px;font-size:16px;text-align:center;}
-.btn-group{margin-top:6px;}
-button{padding:6px 14px;font-size:14px;margin:0 5px}
-#boardWrap{position:relative}
+*{box-sizing:border-box;margin:0;padding:0;font-family:"SimHei","Microsoft YaHei",sans-serif}
+html,body{max-width:100%;overflow-x:hidden;}
+body{background:#f0e2cb;display:flex;flex-direction:column;align-items:center;padding:14px;}
+#info-bar{width:100%;max-width:468px;margin-bottom:8px;font-size:16px;text-align:center;}
+.btn-group{margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;}
+button{padding:6px 14px;font-size:14px;cursor:pointer;touch-action:manipulation;}
+select{touch-action:manipulation;}
+/* 棋盘缩放容器：内部保持 468x520 设计尺寸，由 JS 按视口宽度整体缩放 */
+#boardScaleWrap{position:relative;width:468px;max-width:100%;}
+#boardWrap{position:relative;width:468px;height:520px;transform-origin:top left;}
 #canvas{
+    display:block;
     border:4px solid #703810;
     background:#ddb883;
+    touch-action:manipulation;
 }
 .piece{
     width:46px;height:46px;border-radius:50%;position:absolute;
     display:flex;align-items:center;justify-content:center;
     font-size:24px;font-weight:bold;cursor:pointer;user-select:none;
-    border:2px solid #222;z-index:10;
+    -webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+    border:2px solid #222;z-index:10;touch-action:manipulation;
     transition:left 0.28s cubic-bezier(0.4,0,0.2,1),top 0.28s cubic-bezier(0.4,0,0.2,1);
 }
 .piece.captured{
@@ -46,7 +60,7 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
 .piece-red{background:#fff8f8;color:#c40000}
 .piece-black{background:#1a1a1a;color:#f8f8f8}
 .piece.selected{box-shadow:0 0 0 4px #0088ff}
-#eval-bar-wrap{width:468px;margin:4px 0 8px;}
+#eval-bar-wrap{width:100%;margin:4px 0 8px;}
 #eval-bar{position:relative;height:18px;border-radius:4px;overflow:hidden;border:1px solid #5c3010;}
 #eval-red{position:absolute;left:0;top:0;height:100%;background:#c40000;width:50%;transition:width 0.4s ease;}
 #eval-black{position:absolute;right:0;top:0;height:100%;background:#1a1a1a;width:50%;transition:width 0.4s ease;}
@@ -61,8 +75,8 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
 }
 #loading-overlay.hidden{opacity:0;pointer-events:none;}
 #loading-title{font-size:22px;color:#5c3010;margin-bottom:12px;font-weight:bold;}
-#loading-subtitle{font-size:13px;color:#7a5030;margin-bottom:24px;text-align:center;max-width:340px;line-height:1.6;}
-#progress-bar-wrap{width:320px;height:26px;background:#d4b896;border-radius:13px;overflow:hidden;border:2px solid #703810;box-shadow:inset 0 1px 3px rgba(0,0,0,0.2);}
+#loading-subtitle{font-size:13px;color:#7a5030;margin-bottom:24px;text-align:center;max-width:80vw;line-height:1.6;}
+#progress-bar-wrap{width:320px;max-width:80vw;height:26px;background:#d4b896;border-radius:13px;overflow:hidden;border:2px solid #703810;box-shadow:inset 0 1px 3px rgba(0,0,0,0.2);}
 #progress-bar{height:100%;background:linear-gradient(90deg,#c40000,#e85050);width:0%;transition:width 0.25s ease;}
 #progress-text{font-size:14px;color:#5c3010;margin-top:12px;font-weight:bold;}
 #loading-fallback{margin-top:24px;display:none;}
@@ -100,12 +114,14 @@ button{padding:6px 14px;font-size:14px;margin:0 5px}
         <button id="undoBtn">悔棋</button>
     </div>
 </div>
+<div id="boardScaleWrap">
 <div id="boardWrap">
 <canvas id="canvas" width="468" height="520"></canvas>
 </div>
+</div>
 <div id="loading-overlay">
     <div id="loading-title">正在加载象棋 AI 引擎</div>
-    <div id="loading-subtitle">首次加载需下载约 50MB 神经网络文件，建议在 WiFi 环境下访问，后续打开会使用浏览器缓存</div>
+    <div id="loading-subtitle">首次加载需下载约 4MB 引擎文件，建议在 WiFi 环境下访问，后续打开会使用浏览器缓存</div>
     <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
     <div id="progress-text">准备中...</div>
     <div id="loading-status"></div>
@@ -142,18 +158,20 @@ let inCheckSide = 0; // 被将军的一方：0=无, 1=黑, 2=红
 let pikafishEngine = null;
 let engineReady = false;
 let engineSkillLevel = 10; // Skill Level 0-20，全平台难度统一
-const ENGINE_MOVETIME = 1500; // 每步思考时间(ms)
+// 设备能力探测：触屏设备适当缩短等待避免卡顿，多核桌面机可多搜一些
+const IS_TOUCH_DEVICE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const CPU_CORES = navigator.hardwareConcurrency || 4;
+const ENGINE_MOVETIME = IS_TOUCH_DEVICE ? 1200 : (CPU_CORES >= 8 ? 2000 : 1500); // 每步思考时间(ms)
 
 async function initPikafishEngine() {
     infoDom.querySelector("div").innerText = "正在加载皮卡鱼引擎...";
     loadingStatus.innerText = "初始化 Web Worker...";
-    // 3秒后若仍未加载完成，显示降级入口
+    // 15秒后若仍未加载完成（弱网下载引擎文件可能较慢），显示降级入口
     const fallbackTimer = setTimeout(() => {
         if (!engineReady) loadingFallback.style.display = "block";
-    }, 3000);
+    }, 15000);
     try {
         pikafishEngine = new PikafishEngine({
-            nnueUrl: 'pikafish.nnue',
             wasmUrl: 'worker.js',
             onProgress: (text) => {
                 infoDom.querySelector("div").innerText = text;
@@ -204,6 +222,19 @@ async function initPikafishEngine() {
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const boardWrap = document.getElementById("boardWrap");
+const scaleWrap = document.getElementById("boardScaleWrap");
+
+// 棋盘按视口宽度整体缩放（内部坐标仍为设计尺寸 468x520，点击坐标由 getBoundingClientRect 换算）
+const BOARD_DESIGN_W = 468, BOARD_DESIGN_H = 520;
+function fitBoard(){
+    const availW = Math.min(BOARD_DESIGN_W, window.innerWidth - 16);
+    const scale = Math.min(1, availW / BOARD_DESIGN_W);
+    boardWrap.style.transform = "scale(" + scale + ")";
+    scaleWrap.style.width = (BOARD_DESIGN_W * scale) + "px";
+    scaleWrap.style.height = (BOARD_DESIGN_H * scale) + "px";
+}
+window.addEventListener("resize", fitBoard);
+fitBoard();
 const infoDom = document.getElementById("info-bar");
 const restartBtn = document.getElementById("restartBtn");
 const undoBtn = document.getElementById("undoBtn");
@@ -295,7 +326,7 @@ restartBtn.onclick = resetGame;
 // ========== AI: Minimax + Alpha-Beta + Quiescence + 长将检测 ==========
 const PIECE_VALUE = {1:1000, 2:450, 3:200, 4:200, 5:10000, 6:450, 7:100};
 let aiDepth = 4;
-let aiTimeLimit = 8000; // 迭代加深时间上限(ms)
+let aiTimeLimit = IS_TOUCH_DEVICE ? 3000 : 8000; // 迭代加深时间上限(ms)，移动端缩短以避免主线程长时间卡死
 let positionHistory = []; // 局面历史，用于长将/重复检测
 let searchStartTime = 0;
 let playerSide = 2; // 玩家执子：2=红方, 1=黑方
@@ -833,7 +864,8 @@ function checkGameEnd(){
     infoDom.querySelector("div").innerText = "游戏结束";
 }
 
-canvas.onclick = function(e){
+canvas.onpointerdown = function(e){
+    e.preventDefault();
     if(gameOver || isAiThinking) return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -990,7 +1022,7 @@ function renderPieces(){
             div.style.left = (ox + viewC(c)*cell - 23) + "px";
             div.style.top = (oy + viewR(r)*cell - 23) + "px";
             div.dataset.pos = r + "_" + c;
-            div.onclick = ()=>click(r,c);
+            div.onpointerdown = (e)=>{ e.preventDefault(); click(r,c); };
             if(selected && selected.r===r && selected.c===c){
                 div.classList.add("selected");
             }
@@ -1223,6 +1255,15 @@ function getAllValid(sr,sc){
 
 resetGame();
 initPikafishEngine();
+
+// 注册 Service Worker：首次访问后缓存引擎与 NNUE，二次访问秒开并可离线对弈
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((e) => {
+            console.warn('Service Worker 注册失败（不影响本次对弈）:', e);
+        });
+    });
+}
 </script>
 </body>
 </html>

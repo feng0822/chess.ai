@@ -1,0 +1,79 @@
+# ============================================================
+# 中国象棋 AI 对弈网站 —— Nginx 配置示例（自建服务器部署）
+# 用法：把 root 改成你服务器上 docs 目录的绝对路径，
+#       放到 /etc/nginx/conf.d/ 下，nginx -t 校验后 reload。
+# HTTPS 证书推荐用 certbot --nginx 自动签发。
+# ============================================================
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$host$request_uri;   # 全站跳转 HTTPS
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    # ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    root /var/www/chess_project/docs;
+    index index.html;
+
+    # ---------- MIME 类型（多数发行版已内置，缺什么补什么）----------
+    types {
+        application/wasm      wasm;
+        application/octet-stream data;
+        text/html             html;
+        text/css              css;
+        text/javascript       js;
+        application/json      json;
+        image/svg+xml         svg;
+    }
+    default_type application/octet-stream;
+
+    # ---------- 压缩（.data 网络包为压缩二进制，压不动也无副作用）----------
+    gzip on;
+    gzip_comp_level 6;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/javascript application/javascript application/wasm image/svg+xml;
+
+    # ---------- 通用安全头 ----------
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # ---------- 引擎网络包(.data,约4MB) / WASM：一年强缓存，不可变 ----------
+    location ~* \.(data|wasm)$ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # ---------- 引擎脚本：长期缓存 ----------
+    location ~* ^/(worker|pikafish|pikafish-engine)\.js$ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    # ---------- Service Worker：必须每次校验，否则更新无法下发 ----------
+    location = /sw.js {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    # ---------- HTML 入口：不缓存，保证版本即时生效 ----------
+    location = / {
+        add_header Cache-Control "no-cache" always;
+        try_files /index.html =404;
+    }
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # ---------- 单页兜底 ----------
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

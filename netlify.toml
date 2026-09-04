@@ -1,0 +1,4 @@
+# Netlify 部署配置：从仓库根目录连接时自动以 docs 为发布目录
+# 缓存响应头见 docs/_headers（Netlify 原生生效）
+[build]
+  publish = "docs"
