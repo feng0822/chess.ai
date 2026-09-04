@@ -25,14 +25,14 @@ select{touch-action:manipulation;}
     display:block;
     border:4px solid #703810;
     background:#ddb883;
-    touch-action:manipulation;
+    touch-action:none;
 }
 .piece{
     width:46px;height:46px;border-radius:50%;position:absolute;
     display:flex;align-items:center;justify-content:center;
     font-size:24px;font-weight:bold;cursor:pointer;user-select:none;
     -webkit-user-select:none;-webkit-tap-highlight-color:transparent;
-    border:2px solid #222;z-index:10;touch-action:manipulation;
+    border:2px solid #222;z-index:10;touch-action:none;
     transition:left 0.28s cubic-bezier(0.4,0,0.2,1),top 0.28s cubic-bezier(0.4,0,0.2,1);
 }
 .piece.captured{
@@ -868,8 +868,12 @@ canvas.onpointerdown = function(e){
     e.preventDefault();
     if(gameOver || isAiThinking) return;
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    // 小屏棋盘经 fitBoard() 的 transform:scale 缩放，getBoundingClientRect 返回的是
+    // 缩放后的屏幕尺寸，必须除以实际缩放比，还原到 468x520 设计坐标，否则手机上点空位会错位
+    const sx = rect.width ? rect.width / canvas.width : 1;
+    const sy = rect.height ? rect.height / canvas.height : 1;
+    const mx = (e.clientX - rect.left) / sx;
+    const my = (e.clientY - rect.top) / sy;
     let c = Math.round((mx - ox)/cell);
     let r = Math.round((my - oy)/cell);
     if(boardFlipped()){ r = 9 - r; c = 8 - c; }
