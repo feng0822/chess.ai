@@ -197,7 +197,9 @@ select{touch-action:manipulation;}
         <button class="mini-btn ghost" id="rvPrev">◀ 上一步</button>
         <button class="mini-btn ghost" id="rvNext">下一步 ▶</button>
         <button class="mini-btn" id="rvLive">回到当前</button>
+        <button class="mini-btn" id="analyzeBtn">🔍 分析局面</button>
     </div>
+    <div id="analyzePanel"></div>
     <div id="moveList"></div>
 </div>
 <div id="resultModal" class="modal-mask">
@@ -1501,6 +1503,8 @@ function loadSnapshot(k){
     board=JSON.parse(JSON.stringify(s.board)); turnRed=s.turnRed;
     lastMove=s.lastMove?{...s.lastMove}:null; inCheckSide=s.inCheckSide;
     selected=null; validMoves=[]; hintMove=null;
+    const _ap=document.getElementById('analyzePanel');
+    if(_ap){ _ap.classList.remove('show'); _ap.innerHTML=''; }
     drawBoard(); renderPieces();
 }
 function gotoReview(i){ // i 为 moveRecords 下标，-1=开局
@@ -1647,6 +1651,64 @@ function openGamesModal(){
     document.getElementById('gamesModal').classList.add('show');
 }
 
+// ---------- 第二梯队：复盘多路线分析 ----------
+let analyzeBusy=false;
+// 在指定棋盘副本上生成中文记谱（不改动全局 board）
+function notationOn(b,sr,sc,tr,tc){
+    const side=b[sr][sc].side,id=b[sr][sc].id,name=getPieceName(side,id);
+    const same=[];for(let r=0;r<10;r++){const p=b[r][sc];if(p.id===id&&p.side===side)same.push(r);}
+    let pre="";if(same.length>=2){const f=side===2?Math.min.apply(null,same):Math.max.apply(null,same);pre=sr===f?"前":"后";}
+    const sc2=pre?"":colLabel(sc,side);let a,t,dr=tr-sr;
+    if(id===2||id===3||id===4){const fw=side===2?dr<0:dr>0;a=fw?"进":"退";t=colLabel(tc,side);}
+    else if(dr===0){a="平";t=colLabel(tc,side);}
+    else{const fw=side===2?dr<0:dr>0;a=fw?"进":"退";t=numLabel(Math.abs(dr),side);}
+    return pre+name+sc2+a+t;
+}
+// UCI 主路线序列 -> 中文连续记谱（在棋盘副本上推演）
+function pvToNotations(uciList, board0, maxSteps){
+    const b=board0.map(row=>row.map(p=>({...p})));
+    const out=[];
+    for(let k=0;k<uciList.length && out.length<(maxSteps||6);k++){
+        const u=uciList[k]; if(!u||u==="(none)") break;
+        const m=parsePikafishMove(u); const pc=b[m.sr][m.sc]; if(!pc||!pc.side) break;
+        out.push(notationOn(b,m.sr,m.sc,m.tr,m.tc));
+        b[m.tr][m.tc]={...b[m.sr][m.sc]}; b[m.sr][m.sc]={side:0,id:0};
+    }
+    return out;
+}
+// 一条 info 的评分转成红视角文字
+function lineScoreText(ln, sideTurnRed){
+    if(ln.mate!==undefined && ln.mate!==null && ln.mate!==0){
+        const winner = ln.mate>0 ? (sideTurnRed?"红":"黑") : (sideTurnRed?"黑":"红");
+        return winner+"方"+Math.abs(ln.mate)+"步杀";
+    }
+    if(typeof ln.score!=="number") return "均势";
+    const red = sideTurnRed ? ln.score/100 : -ln.score/100;
+    return (red>=0?"+":"")+red.toFixed(2);
+}
+// 对当前（复盘或实时）局面做多路线分析
+async function analyzePosition(){
+    if(analyzeBusy||isAiThinking||isAnalyzing) return;
+    if(!engineReady||!pikafishEngine){ infoDom.querySelector("div").innerText="引擎尚未就绪，暂无法分析"; return; }
+    analyzeBusy=true;
+    const btn=document.getElementById("analyzeBtn"); const oldTxt=btn.innerText; btn.disabled=true; btn.innerText="分析中...";
+    const panel=document.getElementById("analyzePanel"); panel.classList.add("show");
+    panel.innerHTML="<div class=\"ap-title\">引擎多路线分析</div><div>计算中，请稍候…</div>";
+    try{
+        const sideTurnRed=turnRed;
+        const det=await pikafishEngine.goDetail(boardToFEN(), IS_TOUCH_DEVICE?700:1000, {multiPV:3});
+        const lines=(det.lines&&det.lines.length)?det.lines:(det.info?[det.info]:[]);
+        let html="<div class=\"ap-title\">皮卡鱼推荐 · 现在轮到"+(sideTurnRed?"红":"黑")+"方</div>";
+        if(!lines.length){ html+="<div>引擎未返回路线</div>"; }
+        lines.slice(0,3).forEach((ln,idx)=>{
+            const score=lineScoreText(ln,sideTurnRed);
+            const pvs=pvToNotations(ln.pv||[], board, 6).join(" ");
+            html+="<div class=\"ap-line\"><span class=\"ap-no\">"+(idx+1)+"</span><span class=\"ap-score\">"+score+"</span><span class=\"ap-pv\">"+pvs+"</span></div>";
+        });
+        panel.innerHTML=html;
+    }catch(e){ panel.innerHTML="<div>分析失败："+e.message+"</div>"; }
+    analyzeBusy=false; btn.disabled=false; btn.innerText=oldTxt;
+}
 // ---------- 第二梯队：着法质量评估 ----------
 // 棋盘坐标 -> 皮卡鱼 UCI（parsePikafishMove 的逆运算）
 function moveToUci(sr,sc,tr,tc){
@@ -1775,6 +1837,7 @@ function bindExtEvents(){
     $('rvPrev').onpointerdown=(e)=>{e.preventDefault();stepReview(-1);};
     $('rvNext').onpointerdown=(e)=>{e.preventDefault();stepReview(1);};
     $('rvLive').onpointerdown=(e)=>{e.preventDefault();gotoLive();};
+    $('analyzeBtn').onpointerdown=(e)=>{e.preventDefault();analyzePosition();};
     $('resultRestart').onclick=()=>{$('resultModal').classList.remove('show');resetGame();};
     $('resultReview').onclick=()=>{$('resultModal').classList.remove('show');$('moveList').classList.add('show');gotoReview(moveRecords.length-1);};
     $('gamesClose').onpointerdown=(e)=>{e.preventDefault();$('gamesModal').classList.remove('show');};
