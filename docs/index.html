@@ -130,6 +130,18 @@ select{touch-action:manipulation;}
 .game-item button{margin-top:4px;font-size:12px;padding:3px 8px;}
 #gamesModal .modal-box{max-width:400px;max-height:80vh;overflow-y:auto;}
 .review-tip{font-size:12px;color:#1565c0;text-align:center;min-height:16px;margin-bottom:2px;}
+/* ===== 第二梯队：着法质量徽章 / 分析面板 / 导出 ===== */
+.mq{display:inline-block;font-size:10px;line-height:15px;padding:0 5px;border-radius:3px;margin-left:4px;color:#fff;vertical-align:middle;font-weight:normal;}
+.mq-best{background:#2e9e44;}.mq-ok{background:#1565c0;}.mq-inacc{background:#c9a227;}.mq-mistake{background:#e07b1a;}.mq-blunder{background:#c40000;}
+#analyzePanel{display:none;margin-top:6px;background:#f7ecd8;border:1px solid #cbb089;border-radius:4px;padding:8px 10px;font-size:13px;color:#5c3010;}
+#analyzePanel.show{display:block;}
+#analyzePanel .ap-title{font-weight:bold;margin-bottom:4px;color:#703810;}
+.ap-line{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px dashed #e0c9a6;}
+.ap-line:last-child{border-bottom:none;}
+.ap-no{width:18px;font-weight:bold;color:#703810;}
+.ap-score{min-width:74px;color:#1565c0;font-variant-numeric:tabular-nums;}
+.ap-pv{color:#6b4a20;font-size:12px;flex:1;}
+.ap-btn-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
 </style>
 </head>
 <body>
@@ -256,6 +268,12 @@ let gameResult = null;    // 'red' | 'black' | null
 let soundOn = true;       // 音效开关
 let audioCtx = null;      // WebAudio 懒加载
 let deferredInstallPrompt = null; // PWA beforeinstallprompt 事件
+// ===== 第二梯队：着法质量评估状态 =====
+let pendingQuality = null; // 玩家落子后等待 AI 回手来评定质量 {bestUci,bestForPlayer,myUci,recIndex}
+let isAnalyzing = false;  // 玩家落子前引擎分析锁
+let qualityOn = true;     // 着法质量分析开关（默认开）
+const MATE_CP = 100000;   // 杀棋折算兵分
+let QUALITY_MOVETIME = 600; // 落子前质量分析用时(ms)，待 IS_TOUCH_DEVICE 定义后校准（避免暂时性死区）
 const SAVE_KEY = 'xiangqi_current_v1';
 const GAMES_KEY = 'xiangqi_games_v1';
 
@@ -267,6 +285,7 @@ let engineSkillLevel = 10; // Skill Level 0-20，全平台难度统一
 const IS_TOUCH_DEVICE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 const CPU_CORES = navigator.hardwareConcurrency || 4;
 const ENGINE_MOVETIME = IS_TOUCH_DEVICE ? 1200 : (CPU_CORES >= 8 ? 2000 : 1500); // 每步思考时间(ms)
+QUALITY_MOVETIME = IS_TOUCH_DEVICE ? 450 : 600;
 
 async function initPikafishEngine() {
     infoDom.querySelector("div").innerText = "正在加载皮卡鱼引擎...";
@@ -930,10 +949,13 @@ async function aiMove(){
     let moveData = null;
     let engineScore = null;
 
+    let aiInfoDetail = null;
     if (engineReady && pikafishEngine) {
         try {
             let fen = boardToFEN();
-            let bestmove = await pikafishEngine.go(fen, ENGINE_MOVETIME);
+            const det = await pikafishEngine.goDetail(fen, ENGINE_MOVETIME, {multiPV:1});
+            aiInfoDetail = det.info;
+            let bestmove = det.bestmove;
             if (bestmove && bestmove !== '(none)') {
                 moveData = parsePikafishMove(bestmove);
             }
@@ -951,7 +973,7 @@ async function aiMove(){
     if(moveData){
         saveHistory();
         animateMove(moveData.sr, moveData.sc, moveData.tr, moveData.tc, () => {
-            finishMove(moveData, engineScore);
+            finishMove(moveData, engineScore, aiInfoDetail);
         });
     } else {
         isAiThinking = false;
@@ -989,7 +1011,7 @@ function checkGameEnd(){
 
 canvas.onpointerdown = function(e){
     e.preventDefault();
-    if(gameOver || isAiThinking) return;
+    if(gameOver || isAiThinking || isAnalyzing) return;
     const rect = canvas.getBoundingClientRect();
     // 小屏棋盘经 fitBoard() 的 transform:scale 缩放，getBoundingClientRect 返回的是
     // 缩放后的屏幕尺寸，必须除以实际缩放比，还原到 468x520 设计坐标，否则手机上点空位会错位
@@ -1006,7 +1028,7 @@ canvas.onpointerdown = function(e){
 }
 
 function handleClick(r,c){
-    if(gameOver || isAiThinking || hintBusy) return;
+    if(gameOver || isAiThinking || hintBusy || isAnalyzing) return;
     if(reviewIndex!==-1){ gotoLive(); return; } // 复盘时点棋盘，先回到当前局面
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
     if(!isPlayerTurn) return;
@@ -1030,30 +1052,7 @@ function handleClick(r,c){
         return;
     }
     if(simulateMove(sr,sc,r,c)){
-        saveHistory();
-        selected=null;
-        validMoves=[];
-        const __pre = preMoveCapture(sr, sc, r, c); // 走子前记录被吃子与中文记谱
-        animateMove(sr, sc, r, c, () => {
-            board[r][c] = {...board[sr][sc]};
-            board[sr][sc] = {side:0,id:0};
-            turnRed=!turnRed;
-            positionHistory.push(boardKey());
-            lastMove = {sr,sc,tr:r,tc:c};
-            updateCheckStatus();
-            updateEvaluation();
-            checkGameEnd();
-            if(!gameOver){
-                infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
-                afterMoveCommitted(sr, sc, r, c, __pre, null);
-                aiMove();
-            }else{
-                infoDom.querySelector("div").innerText = "游戏结束";
-                afterMoveCommitted(sr, sc, r, c, __pre, null);
-            }
-            drawBoard();
-            renderPieces();
-        });
+        commitPlayerMove(sr,sc,r,c);
         return;
     }
     // 走法不合法，取消选中
@@ -1207,7 +1206,7 @@ function updateCheckStatus(){
 }
 
 // AI走子后的统一收尾（更新数据+渲染+评估）
-function finishMove(moveData, engineScore){
+function finishMove(moveData, engineScore, aiInfo){
     const __pre = preMoveCapture(moveData.sr, moveData.sc, moveData.tr, moveData.tc);
     board[moveData.tr][moveData.tc] = {...board[moveData.sr][moveData.sc]};
     board[moveData.sr][moveData.sc] = {side:0,id:0};
@@ -1231,6 +1230,7 @@ function finishMove(moveData, engineScore){
         updateEvaluation();
     }
     afterMoveCommitted(moveData.sr, moveData.sc, moveData.tr, moveData.tc, __pre, redScore);
+    applyPendingQuality(aiInfo); // AI 回手后，给玩家上一步评定质量
 }
 
 function inBoard(r,c){
@@ -1472,11 +1472,12 @@ function renderMoveList(){
     const box = document.getElementById('moveList');
     let html = '<div class="move-grid">';
     const cellCls = (i)=> 'mg ' + (reviewIndex===i ? 'review' : (reviewIndex===-1 && i===moveRecords.length-1 ? 'act' : ''));
+    const qBadge = (m)=> (m && m.quality) ? '<span class="mq mq-'+m.quality.cls+'">'+m.quality.label+'</span>' : '';
     for(let i=0;i<moveRecords.length;i+=2){
         const red=moveRecords[i], black=moveRecords[i+1], no=i/2+1;
         html += `<div class="mg mg-no">${no}.</div>`;
-        html += `<div class="${cellCls(i)}" data-i="${i}">${red.notation}${red.suffix||''}</div>`;
-        html += `<div class="${black?cellCls(i+1):'mg'}" data-i="${i+1}">${black?black.notation+(black.suffix||''):''}</div>`;
+        html += `<div class="${cellCls(i)}" data-i="${i}">${red.notation}${red.suffix||''}${qBadge(red)}</div>`;
+        html += `<div class="${black?cellCls(i+1):'mg'}" data-i="${i+1}">${black?black.notation+(black.suffix||'')+qBadge(black):''}</div>`;
     }
     html += '</div>';
     box.innerHTML = html;
@@ -1567,6 +1568,10 @@ function afterMoveCommitted(sr,sc,tr,tc,pre,score){
     evalHistory.push(s);
     renderCaptured(); renderMoveList(); drawEvalChart(); refreshReviewButtons();
     saveCurrentGame();
+    if(pendingQuality && moverSide===playerSide){
+        pendingQuality.recIndex = moveRecords.length-1;
+        if(gameOver) applyPendingQuality(null); // 玩家这步直接结束对局（杀）
+    }
     if(gameOver) finishGameResult();
 }
 
@@ -1642,6 +1647,84 @@ function openGamesModal(){
     document.getElementById('gamesModal').classList.add('show');
 }
 
+// ---------- 第二梯队：着法质量评估 ----------
+// 棋盘坐标 -> 皮卡鱼 UCI（parsePikafishMove 的逆运算）
+function moveToUci(sr,sc,tr,tc){
+    return String.fromCharCode(97+sc)+(9-sr)+String.fromCharCode(97+tc)+(9-tr);
+}
+// 玩家落子：先对“落子前局面”做一次引擎分析（用于着法质量），再真正走子
+async function commitPlayerMove(sr,sc,r,c){
+    let bestUci=null, bestForPlayer=null;
+    if(qualityOn && engineReady && pikafishEngine){
+        isAnalyzing=true;
+        infoDom.querySelector("div").innerText="分析中...";
+        try{
+            const fenBefore=boardToFEN();
+            const det=await pikafishEngine.goDetail(fenBefore, QUALITY_MOVETIME, {multiPV:1});
+            bestUci=det.bestmove;
+            const inf=det.info;
+            if(inf){
+                if(inf.mate!==undefined && inf.mate!==null){ bestForPlayer = inf.mate>0?MATE_CP:(inf.mate<0?-MATE_CP:0); }
+                else if(typeof inf.score==="number"){ bestForPlayer=inf.score/100; } // cp 厘兵 -> 兵分
+            }
+        }catch(e){ bestUci=null; bestForPlayer=null; }
+        isAnalyzing=false;
+        if(gameOver) return;
+    }
+    saveHistory();
+    selected=null; validMoves=[];
+    pendingQuality={ bestUci, bestForPlayer, myUci:moveToUci(sr,sc,r,c), recIndex:-1 };
+    const __pre=preMoveCapture(sr,sc,r,c);
+    animateMove(sr,sc,r,c,()=>{
+        board[r][c]={...board[sr][sc]};
+        board[sr][sc]={side:0,id:0};
+        turnRed=!turnRed;
+        positionHistory.push(boardKey());
+        lastMove={sr,sc,tr:r,tc:c};
+        updateCheckStatus(); updateEvaluation(); checkGameEnd();
+        if(!gameOver){
+            infoDom.querySelector("div").innerText=turnRed?"红方走棋":"黑方走棋";
+            afterMoveCommitted(sr,sc,r,c,__pre,null);
+            aiMove();
+        }else{
+            infoDom.querySelector("div").innerText="游戏结束";
+            afterMoveCommitted(sr,sc,r,c,__pre,null);
+        }
+        drawBoard(); renderPieces();
+    });
+}
+// 按“最佳着与实战着的兵分分差”分类着法质量
+function classifyQuality(loss,isBest,playerWon){
+    if(playerWon) return {label:"妙手",cls:"best"};
+    if(isBest) return {label:"最佳",cls:"best"};
+    if(loss===null||loss===undefined) return null;
+    if(loss<=20) return {label:"正着",cls:"ok"};
+    if(loss<=60) return {label:"缓手",cls:"inacc"};
+    if(loss<=200) return {label:"错着",cls:"mistake"};
+    return {label:"漏着",cls:"blunder"};
+}
+// AI 回手后（或玩家终局时）回填玩家上一步的质量徽章
+function applyPendingQuality(aiInfo){
+    if(!pendingQuality) return;
+    const idx=pendingQuality.recIndex;
+    const rec=moveRecords[idx];
+    if(!rec){ pendingQuality=null; return; }
+    let actualForPlayer=null;
+    if(aiInfo){
+        if(aiInfo.mate!==undefined && aiInfo.mate!==null){ actualForPlayer=aiInfo.mate>0?-MATE_CP:MATE_CP; }
+        else if(typeof aiInfo.score==="number"){ actualForPlayer=-aiInfo.score/100; } // AI视角 -> 玩家视角
+    }
+    const isBest=!!(pendingQuality.bestUci && pendingQuality.myUci && pendingQuality.bestUci===pendingQuality.myUci);
+    let loss=null;
+    if(pendingQuality.bestForPlayer!==null && actualForPlayer!==null){
+        loss=pendingQuality.bestForPlayer-actualForPlayer;
+    }
+    const playerWon=gameOver && (gameResult==="red"?playerSide===2:playerSide===1);
+    const q=classifyQuality(loss,isBest,playerWon);
+    if(q){ rec.quality=q; }
+    pendingQuality=null;
+    renderMoveList(); saveCurrentGame();
+}
 // ---------- 引擎着法提示 ----------
 async function showHint(){
     if(gameOver||isAiThinking||hintBusy||reviewIndex!==-1) return;
