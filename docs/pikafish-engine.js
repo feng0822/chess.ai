@@ -15,6 +15,9 @@ class PikafishEngine {
         this._uciReady = false;
         this._resolveQueue = [];
         this._bestMove = null;
+        this._lastInfo = null;      // 最近一条 multipv=1 的 info（含 score/pv）
+        this._pvLines = {};         // multipv 序号 -> 最新 info（多路线分析）
+        this._multiPV = 1;          // 当前 MultiPV 设置
         // 皮卡鱼无 "Skill Level" 选项，用搜索深度区分五档强度
         this.searchDepth = 10;
     }
@@ -72,8 +75,11 @@ class PikafishEngine {
 
     _handleStdout(line) {
         if (!line) return;
-        if (line.startsWith('info') && this.onInfo) {
-            this.onInfo(this._parseInfo(line));
+        if (line.startsWith('info')) {
+            const parsed = this._parseInfo(line);
+            if (parsed.multipv) this._pvLines[parsed.multipv] = parsed;
+            if (!parsed.multipv || parsed.multipv === 1) this._lastInfo = parsed;
+            if (this.onInfo) this.onInfo(parsed);
         }
         if (line.startsWith('bestmove')) {
             const parts = line.split(/\s+/);
@@ -94,9 +100,11 @@ class PikafishEngine {
             if (parts[i] === 'nodes' && parts[i+1]) info.nodes = parseInt(parts[i+1]);
             if (parts[i] === 'nps' && parts[i+1]) info.nps = parseInt(parts[i+1]);
             if (parts[i] === 'time' && parts[i+1]) info.time = parseInt(parts[i+1]);
+            if (parts[i] === 'multipv' && parts[i+1]) info.multipv = parseInt(parts[i+1]);
             if (parts[i] === 'score' && parts[i+1] && parts[i+2]) {
-                info.scoreType = parts[i+1];
+                info.scoreType = parts[i+1]; // cp=厘兵分, mate=杀棋步数
                 info.score = parseInt(parts[i+2]);
+                if (parts[i+1] === 'mate') info.mate = info.score;
             }
             if (parts[i] === 'pv') info.pv = parts.slice(i+1);
         }
@@ -131,15 +139,35 @@ class PikafishEngine {
         else this.searchDepth = 20;                 // 大师
     }
 
-    async go(fen, movetime = 1000) {
+    setOption(name, value) { this._send(`setoption name ${name} value ${value}`); }
+    setMultiPV(n) {
+        n = Math.max(1, Math.min(5, n | 0));
+        this._multiPV = n;
+        this.setOption('MultiPV', n);
+    }
+    // 详细分析：返回 bestmove、主路线信息、多路线 lines（按 multipv 升序）
+    async goDetail(fen, movetime = 1000, opts = {}) {
         if (!this.ready) throw new Error('引擎未就绪');
+        const multiPV = opts.multiPV || 1;
+        const depth = opts.depth || this.searchDepth;
+        if (multiPV !== this._multiPV) this.setMultiPV(multiPV);
         this._bestMove = null;
+        this._lastInfo = null;
+        this._pvLines = {};
         this._send('ucinewgame');
         this._send(`position fen ${fen}`);
-        // 同时给出深度与时间上限，任一达到即停止，兼顾强度档位与响应速度
-        this._send(`go depth ${this.searchDepth} movetime ${movetime}`);
+        this._send(`go depth ${depth} movetime ${movetime}`);
         await this._waitFor('bestmove');
-        return this._bestMove;
+        const lines = Object.keys(this._pvLines)
+            .map(k => this._pvLines[+k])
+            .sort((a, b) => (a.multipv || 1) - (b.multipv || 1));
+        const result = { bestmove: this._bestMove, info: this._lastInfo, lines };
+        if (this._multiPV !== 1) this.setMultiPV(1); // 复位，避免影响后续对弈搜索
+        return result;
+    }
+    async go(fen, movetime = 1000) {
+        const r = await this.goDetail(fen, movetime, { multiPV: 1 });
+        return r.bestmove;
     }
 
     stop() { this._send('stop'); }
