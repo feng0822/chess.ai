@@ -142,6 +142,8 @@ select{touch-action:manipulation;}
 .ap-score{min-width:74px;color:#1565c0;font-variant-numeric:tabular-nums;}
 .ap-pv{color:#6b4a20;font-size:12px;flex:1;}
 .ap-btn-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+#exportText{width:100%;height:190px;font-size:12px;line-height:1.7;padding:8px;border:1px solid #cbb089;border-radius:4px;background:#fbf3e4;color:#3a2010;font-family:Consolas,monospace;resize:vertical;}
+#exportModal .modal-box{max-width:420px;}
 </style>
 </head>
 <body>
@@ -175,6 +177,7 @@ select{touch-action:manipulation;}
         <button id="soundBtn">🔊 声音</button>
         <button id="movesBtn">棋谱</button>
         <button id="gamesBtn">对局记录</button>
+        <button id="exportBtn">导出棋谱</button>
         <button id="installBtn" style="display:none">安装到桌面</button>
     </div>
 </div>
@@ -219,6 +222,17 @@ select{touch-action:manipulation;}
         <div class="modal-btns">
             <button class="btn-secondary" id="gamesClear">清空记录</button>
             <button class="btn-primary" id="gamesClose">关闭</button>
+        </div>
+    </div>
+</div>
+<div id="exportModal" class="modal-mask">
+    <div class="modal-box" style="text-align:left;">
+        <h2 style="text-align:center;">导出棋谱</h2>
+        <textarea id="exportText" readonly></textarea>
+        <div class="modal-btns" style="margin-top:12px;">
+            <button class="btn-primary" id="exportCopy">复制棋谱</button>
+            <button class="btn-secondary" id="exportFen">复制当前FEN</button>
+            <button class="btn-secondary" id="exportClose">关闭</button>
         </div>
     </div>
 </div>
@@ -1807,6 +1821,38 @@ async function showHint(){
     if(!gameOver && reviewIndex===-1) infoDom.querySelector('div').innerText=oldText;
 }
 
+// ---------- 第二梯队：棋谱导出 / FEN ----------
+function buildGameText(){
+    const sel=document.getElementById("difficulty");
+    const lvl=sel&&sel.selectedOptions[0]?sel.selectedOptions[0].text:"";
+    const resultTxt=gameResult?(gameResult==="red"?"红胜":"黑胜"):"对局进行中";
+    let txt="中国象棋 AI 对弈 棋谱"+String.fromCharCode(10);
+    txt+="我方执"+(playerSide===2?"红":"黑")+"    难度："+lvl+"    结果："+resultTxt+String.fromCharCode(10);
+    txt+="共 "+moveRecords.length+" 手"+String.fromCharCode(10)+String.fromCharCode(10);
+    for(let i=0;i<moveRecords.length;i+=2){
+        const n=i/2+1, r=moveRecords[i], b=moveRecords[i+1];
+        let line=n+". "+r.notation+(r.suffix||"");
+        if(b) line+="  "+b.notation+(b.suffix||"");
+        txt+=line+String.fromCharCode(10);
+    }
+    txt+=String.fromCharCode(10)+"当前局面 FEN："+String.fromCharCode(10)+boardToFEN();
+    return txt;
+}
+function copyTextFallback(txt,ok){
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(ok,()=>fallback());
+    }else fallback();
+    function fallback(){
+        const ta=document.createElement("textarea");ta.value=txt;ta.style.position="fixed";ta.style.opacity="0";
+        document.body.appendChild(ta);ta.focus();ta.select();
+        try{document.execCommand("copy");ok();}catch(e){alert("复制失败，请手动长按选择文本复制");}
+        document.body.removeChild(ta);
+    }
+}
+function openExport(){
+    document.getElementById("exportText").value=buildGameText();
+    document.getElementById("exportModal").classList.add("show");
+}
 // ---------- PWA 安装 ----------
 function initPWA(){
     window.addEventListener('beforeinstallprompt',(e)=>{
@@ -1841,6 +1887,10 @@ function bindExtEvents(){
     $('resultRestart').onclick=()=>{$('resultModal').classList.remove('show');resetGame();};
     $('resultReview').onclick=()=>{$('resultModal').classList.remove('show');$('moveList').classList.add('show');gotoReview(moveRecords.length-1);};
     $('gamesClose').onpointerdown=(e)=>{e.preventDefault();$('gamesModal').classList.remove('show');};
+    $('exportBtn').onpointerdown=(e)=>{e.preventDefault();openExport();};
+    $('exportClose').onpointerdown=(e)=>{e.preventDefault();$('exportModal').classList.remove('show');};
+    $('exportCopy').onpointerdown=(e)=>{e.preventDefault();copyTextFallback(document.getElementById('exportText').value,()=>{$('exportCopy').innerText='已复制 ✓';setTimeout(()=>$('exportCopy').innerText='复制棋谱',1500);});};
+    $('exportFen').onpointerdown=(e)=>{e.preventDefault();copyTextFallback(boardToFEN(),()=>{$('exportFen').innerText='FEN已复制 ✓';setTimeout(()=>$('exportFen').innerText='复制当前FEN',1500);});};
     $('gamesClear').onpointerdown=(e)=>{e.preventDefault();localStorage.removeItem(GAMES_KEY);openGamesModal();};
     $('resumeYes').onpointerdown=(e)=>{e.preventDefault();$('resumeBar').classList.remove('show');
         const aiTurn=turnRed?(playerSide===1):(playerSide===2); if(aiTurn&&engineReady) aiMove(); };
