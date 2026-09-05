@@ -6,6 +6,12 @@
 <title>中国象棋 AI 对弈 - 皮卡鱼引擎在线人机对战</title>
 <meta name="description" content="纯前端中国象棋人机对弈网站，内置皮卡鱼 Pikafish NNUE 神经网络引擎，浏览器本地运行无需后端，支持五档难度、悔棋、实时局面评估。">
 <meta name="theme-color" content="#703810">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="中国象棋">
+<link rel="apple-touch-icon" href="icon.svg">
 <meta property="og:type" content="website">
 <meta property="og:title" content="中国象棋 AI 对弈">
 <meta property="og:description" content="内置皮卡鱼 Pikafish 引擎的在线中国象棋人机对弈，五档难度，浏览器本地运行，打开即玩。">
@@ -83,6 +89,47 @@ select{touch-action:manipulation;}
 #loading-fallback button{padding:9px 22px;font-size:14px;background:#703810;color:#f0e2cb;border:none;border-radius:4px;cursor:pointer;}
 #loading-fallback button:hover{background:#8a4818;}
 #loading-status{font-size:13px;color:#8a6040;margin-top:8px;min-height:18px;}
+/* ===== 第一梯队扩展：吃子栏/复盘/棋谱/评估曲线/弹窗 ===== */
+#ext-panel{width:100%;max-width:468px;margin-top:8px;}
+.cap-row{display:flex;align-items:center;gap:4px;min-height:26px;font-size:13px;color:#5c3010;padding:2px 0;flex-wrap:wrap;}
+.cap-row .cap-label{font-weight:bold;margin-right:4px;min-width:52px;}
+.cap-piece{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;
+    font-size:13px;font-weight:bold;border:1.5px solid #222;}
+.cap-red{background:#1a1a1a;color:#f8f8f8;}   /* 红方吃掉的黑子，显示为黑底白字 */
+.cap-black{background:#fff8f8;color:#c40000;} /* 黑方吃掉的红子，显示为红底红字 */
+.cap-empty{color:#a98c66;font-size:12px;}
+#evalChartWrap{width:100%;margin-top:4px;}
+#evalChart{width:100%;height:54px;display:block;background:#e9d6b4;border:1px solid #b8946a;border-radius:4px;}
+.review-bar{display:flex;gap:6px;align-items:center;justify-content:center;margin:6px 0;flex-wrap:wrap;}
+.mini-btn{padding:5px 10px;font-size:13px;background:#703810;color:#f0e2cb;border:none;border-radius:4px;cursor:pointer;touch-action:manipulation;}
+.mini-btn:disabled{opacity:.4;cursor:default;}
+.mini-btn.ghost{background:#e0c9a6;color:#5c3010;border:1px solid #b8946a;}
+#moveList{max-height:150px;overflow-y:auto;background:#f7ecd8;border:1px solid #cbb089;border-radius:4px;font-size:13px;margin-top:4px;display:none;}
+#moveList.show{display:block;}
+.move-grid{display:grid;grid-template-columns:38px 1fr 1fr;border-top:1px solid #e0c9a6;}
+.move-grid .mg{padding:3px 6px;border-bottom:1px solid #e8d6b8;}
+.move-grid .mg-no{color:#8a6040;text-align:center;}
+.move-grid .mg.act{background:#ffe6b0;font-weight:bold;}
+.move-grid .mg.review{color:#1565c0;font-weight:bold;}
+.modal-mask{position:fixed;inset:0;background:rgba(40,25,10,.55);z-index:10000;display:none;align-items:center;justify-content:center;padding:20px;}
+.modal-mask.show{display:flex;}
+.modal-box{background:#fbf3e4;border-radius:10px;padding:22px 20px;max-width:340px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.35);}
+.modal-box h2{color:#703810;margin-bottom:8px;font-size:22px;}
+.modal-box p{color:#5c3010;font-size:14px;line-height:1.7;margin-bottom:16px;}
+.modal-box .modal-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+.modal-box .modal-btns button{padding:9px 18px;border-radius:5px;border:none;font-size:14px;cursor:pointer;}
+.btn-primary{background:#c40000;color:#fff;}
+.btn-secondary{background:#e0c9a6;color:#5c3010;}
+#resumeBar{display:none;width:100%;max-width:468px;background:#ffe9b8;border:1px solid #d9a93b;color:#6b4a10;font-size:13px;
+    padding:6px 10px;border-radius:5px;margin-bottom:6px;align-items:center;gap:8px;justify-content:space-between;}
+#resumeBar.show{display:flex;}
+#resumeBar button{padding:3px 10px;font-size:12px;border-radius:4px;border:none;cursor:pointer;}
+.game-item{border-bottom:1px solid #e0c9a6;padding:8px 6px;font-size:13px;text-align:left;}
+.game-item .gi-head{display:flex;justify-content:space-between;color:#5c3010;font-weight:bold;margin-bottom:2px;}
+.game-item .gi-moves{color:#8a6040;font-size:12px;max-height:42px;overflow:hidden;}
+.game-item button{margin-top:4px;font-size:12px;padding:3px 8px;}
+#gamesModal .modal-box{max-width:400px;max-height:80vh;overflow-y:auto;}
+.review-tip{font-size:12px;color:#1565c0;text-align:center;min-height:16px;margin-bottom:2px;}
 </style>
 </head>
 <body>
@@ -112,12 +159,54 @@ select{touch-action:manipulation;}
         </select>
         <button id="restartBtn">重新开始</button>
         <button id="undoBtn">悔棋</button>
+        <button id="hintBtn">提示</button>
+        <button id="soundBtn">🔊 声音</button>
+        <button id="movesBtn">棋谱</button>
+        <button id="gamesBtn">对局记录</button>
+        <button id="installBtn" style="display:none">安装到桌面</button>
     </div>
 </div>
+<div id="resumeBar"><span id="resumeText"></span><span>
+    <button class="btn-primary" id="resumeYes" style="background:#703810;color:#f0e2cb;">继续</button>
+    <button class="btn-secondary" id="resumeNo">新对局</button>
+</span></div>
 <div id="boardScaleWrap">
 <div id="boardWrap">
 <canvas id="canvas" width="468" height="520"></canvas>
 </div>
+</div>
+<div id="ext-panel">
+    <div class="cap-row"><span class="cap-label">红吃：</span><span id="capByRed" class="cap-empty">暂无</span></div>
+    <div class="cap-row"><span class="cap-label">黑吃：</span><span id="capByBlack" class="cap-empty">暂无</span></div>
+    <div id="evalChartWrap"><canvas id="evalChart" width="468" height="54"></canvas></div>
+    <div class="review-tip" id="reviewTip"></div>
+    <div class="review-bar">
+        <button class="mini-btn ghost" id="rvFirst">⏮ 开局</button>
+        <button class="mini-btn ghost" id="rvPrev">◀ 上一步</button>
+        <button class="mini-btn ghost" id="rvNext">下一步 ▶</button>
+        <button class="mini-btn" id="rvLive">回到当前</button>
+    </div>
+    <div id="moveList"></div>
+</div>
+<div id="resultModal" class="modal-mask">
+    <div class="modal-box">
+        <h2 id="resultTitle">对局结束</h2>
+        <p id="resultDetail"></p>
+        <div class="modal-btns">
+            <button class="btn-primary" id="resultRestart">再来一局</button>
+            <button class="btn-secondary" id="resultReview">查看棋谱</button>
+        </div>
+    </div>
+</div>
+<div id="gamesModal" class="modal-mask">
+    <div class="modal-box">
+        <h2>历史对局</h2>
+        <div id="gamesList" style="max-height:50vh;overflow-y:auto;margin-bottom:14px;"></div>
+        <div class="modal-btns">
+            <button class="btn-secondary" id="gamesClear">清空记录</button>
+            <button class="btn-primary" id="gamesClose">关闭</button>
+        </div>
+    </div>
 </div>
 <div id="loading-overlay">
     <div id="loading-title">正在加载象棋 AI 引擎</div>
@@ -153,6 +242,22 @@ let history=[];
 let isAiThinking = false; // AI正在走棋锁，防止重复点击
 let lastMove = null; // 上一步走子 {sr,sc,tr,tc}
 let inCheckSide = 0; // 被将军的一方：0=无, 1=黑, 2=红
+
+// ===== 第一梯队扩展状态 =====
+let moveRecords = [];     // 棋谱：{side,sr,sc,tr,tc,pieceId,capturedId,notation,suffix}
+let snapshots = [];       // 局面快照，snapshots[0]=初始，snapshots[k]=第k步之后（用于复盘）
+let capturedByRed = [];   // 红方吃掉的黑子 id
+let capturedByBlack = []; // 黑方吃掉的红子 id
+let evalHistory = [];     // 每步之后的红方视角评估分
+let reviewIndex = -1;     // 复盘位置：-1=当前实时局面，>=0=正在看第几步之后
+let hintMove = null;      // 引擎提示着法 {sr,sc,tr,tc}
+let hintBusy = false;     // 正在向引擎求提示，锁住棋盘避免并发
+let gameResult = null;    // 'red' | 'black' | null
+let soundOn = true;       // 音效开关
+let audioCtx = null;      // WebAudio 懒加载
+let deferredInstallPrompt = null; // PWA beforeinstallprompt 事件
+const SAVE_KEY = 'xiangqi_current_v1';
+const GAMES_KEY = 'xiangqi_games_v1';
 
 // ========== 皮卡鱼 WASM 引擎（本地浏览器运行，无需后端） ==========
 let pikafishEngine = null;
@@ -271,32 +376,55 @@ function saveHistory(){
     })
 }
 
+// 回退一步扩展数据：棋谱/快照/评估曲线/吃子栏
+function rewindExt(){
+    if(moveRecords.length){
+        const rec = moveRecords.pop();
+        if(rec.capturedId){
+            const arr = rec.side===2 ? capturedByRed : capturedByBlack;
+            const idx = arr.lastIndexOf(rec.capturedId);
+            if(idx>=0) arr.splice(idx,1);
+        }
+    }
+    if(snapshots.length>1) snapshots.pop();
+    if(evalHistory.length) evalHistory.pop();
+}
 function undo(){
     if(history.length===0 || isAiThinking) return;
+    if(reviewIndex!==-1) gotoLive(); // 复盘模式先回到当前
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
     // 玩家回合时撤销两步（玩家+AI），回到玩家上一步
-    if(isPlayerTurn && history.length >= 2){
-        history.pop();
+    let steps = (isPlayerTurn && history.length >= 2) ? 2 : 1;
+    let last=null;
+    for(let i=0;i<steps;i++){
+        if(history.length===0) break;
         positionHistory.pop();
+        last = history.pop();
+        rewindExt();
     }
-    let last = history.pop();
+    if(!last) return;
     board = last.board;
     turnRed = last.turnRed;
-    gameOver = last.gameOver;
-    positionHistory.pop();
+    gameOver = false;
+    gameResult = null;
     zobristHash = computeHash();
     selected=null;
     validMoves=[];
-    lastMove=null;
+    hintMove=null;
+    const rec = moveRecords.length ? moveRecords[moveRecords.length-1] : null;
+    lastMove = rec ? {sr:rec.sr,sc:rec.sc,tr:rec.tr,tc:rec.tc} : null;
     updateCheckStatus();
     infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
     drawBoard();
     renderPieces();
     updateEvaluation();
+    renderExtAll();
+    saveCurrentGame();
 }
 undoBtn.onclick = undo;
 
-function resetGame(){
+function resetGame(allowAi){
+    if(allowAi===undefined) allowAi=true;
     // 停止引擎当前思考
     if (pikafishEngine && engineReady) {
         try { pikafishEngine.stop(); } catch(e){}
@@ -311,13 +439,18 @@ function resetGame(){
     isAiThinking = false;
     lastMove = null;
     inCheckSide = 0;
+    resetExt(); // 清空棋谱/吃子/评估历史/复盘并建立初始快照
     zobristHash = computeHash();
     infoDom.querySelector("div").innerText = "红方先行";
+    const rm=document.getElementById('resultModal'); if(rm) rm.classList.remove('show');
+    const rb=document.getElementById('resumeBar'); if(rb) rb.classList.remove('show');
+    const ml=document.getElementById('moveList'); if(ml) ml.classList.remove('show');
     drawBoard();
     renderPieces();
     updateEvaluation();
-    // 玩家选黑方时，AI是红方，先走
-    if(playerSide === 1){
+    renderExtAll();
+    // 玩家选黑方时，AI是红方，先走（启动恢复阶段不自动走）
+    if(allowAi && playerSide === 1){
         aiMove();
     }
 }
@@ -848,19 +981,9 @@ function checkGameEnd(){
 
     gameOver=true;
     let isCheck = isInCheck(currentSide);
-    if(isCheck){
-        if(turnRed){
-            alert("红方被将死，黑方胜利！");
-        }else{
-            alert("黑方被将死，红方胜利！");
-        }
-    }else{
-        if(turnRed){
-            alert("红方困毙，黑方胜利！");
-        }else{
-            alert("黑方困毙，红方胜利！");
-        }
-    }
+    endReason = isCheck ? '将死' : '困毙';
+    // 当前轮次方无路可走 → 对方获胜（currentSide=2红无路则黑胜）
+    gameResult = currentSide===2 ? 'black' : 'red';
     infoDom.querySelector("div").innerText = "游戏结束";
 }
 
@@ -883,7 +1006,8 @@ canvas.onpointerdown = function(e){
 }
 
 function handleClick(r,c){
-    if(gameOver || isAiThinking) return;
+    if(gameOver || isAiThinking || hintBusy) return;
+    if(reviewIndex!==-1){ gotoLive(); return; } // 复盘时点棋盘，先回到当前局面
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
     if(!isPlayerTurn) return;
     const piece = board[r][c];
@@ -909,6 +1033,7 @@ function handleClick(r,c){
         saveHistory();
         selected=null;
         validMoves=[];
+        const __pre = preMoveCapture(sr, sc, r, c); // 走子前记录被吃子与中文记谱
         animateMove(sr, sc, r, c, () => {
             board[r][c] = {...board[sr][sc]};
             board[sr][sc] = {side:0,id:0};
@@ -920,9 +1045,11 @@ function handleClick(r,c){
             checkGameEnd();
             if(!gameOver){
                 infoDom.querySelector("div").innerText = turnRed ? "红方走棋" : "黑方走棋";
+                afterMoveCommitted(sr, sc, r, c, __pre, null);
                 aiMove();
             }else{
                 infoDom.querySelector("div").innerText = "游戏结束";
+                afterMoveCommitted(sr, sc, r, c, __pre, null);
             }
             drawBoard();
             renderPieces();
@@ -995,6 +1122,21 @@ function drawBoard(){
         ctx.arc(x,y,11,0,Math.PI*2);
         ctx.fill();
     }
+    // 引擎推荐着法：绿色箭头
+    if(hintMove){
+        const x1=ox+viewC(hintMove.sc)*cell, y1=oy+viewR(hintMove.sr)*cell;
+        const x2=ox+viewC(hintMove.tc)*cell, y2=oy+viewR(hintMove.tr)*cell;
+        ctx.strokeStyle="rgba(0,150,60,0.72)";
+        ctx.fillStyle="rgba(0,150,60,0.72)";
+        ctx.lineWidth=7; ctx.lineCap="round";
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+        const ang=Math.atan2(y2-y1,x2-x1), ah=15;
+        ctx.beginPath(); ctx.moveTo(x2,y2);
+        ctx.lineTo(x2-ah*Math.cos(ang-0.42), y2-ah*Math.sin(ang-0.42));
+        ctx.lineTo(x2-ah*Math.cos(ang+0.42), y2-ah*Math.sin(ang+0.42));
+        ctx.closePath(); ctx.fill();
+        ctx.lineWidth=2; ctx.lineCap="butt";
+    }
 }
 
 function getPieceName(side,id){
@@ -1066,6 +1208,7 @@ function updateCheckStatus(){
 
 // AI走子后的统一收尾（更新数据+渲染+评估）
 function finishMove(moveData, engineScore){
+    const __pre = preMoveCapture(moveData.sr, moveData.sc, moveData.tr, moveData.tc);
     board[moveData.tr][moveData.tc] = {...board[moveData.sr][moveData.sc]};
     board[moveData.sr][moveData.sc] = {side:0,id:0};
     turnRed = !turnRed;
@@ -1078,13 +1221,16 @@ function finishMove(moveData, engineScore){
     else infoDom.querySelector("div").innerText = "游戏结束";
     drawBoard();
     renderPieces();
+    let redScore = null;
     if(engineScore !== null && engineScore !== undefined){
         lastEngineScore = (aiSideVal() === 1) ? -engineScore : engineScore;
+        redScore = lastEngineScore;
         updateEvalFromScore(lastEngineScore);
     } else {
         lastEngineScore = null;
         updateEvaluation();
     }
+    afterMoveCommitted(moveData.sr, moveData.sc, moveData.tr, moveData.tc, __pre, redScore);
 }
 
 function inBoard(r,c){
@@ -1257,8 +1403,316 @@ function getAllValid(sr,sc){
     return res;
 }
 
-resetGame();
-initPikafishEngine();
+// ================= 第一梯队：记谱 / 复盘 / 吃子 / 评估曲线 / 音效 / 存档 / 提示 / PWA =================
+const CN_NUM = ['零','一','二','三','四','五','六','七','八','九'];
+// 中式记谱：红用中文数字且列从右往左，黑用阿拉伯数字
+function colLabel(c, side){ return side === 2 ? CN_NUM[9 - c] : String(c + 1); }
+function numLabel(n, side){ return side === 2 ? CN_NUM[n] : String(n); }
+function buildNotation(sr, sc, tr, tc){ // 必须在走子前的 board 上调用
+    const side = board[sr][sc].side, id = board[sr][sc].id;
+    const name = getPieceName(side, id);
+    const same = [];
+    for(let r=0;r<10;r++){ const p=board[r][sc]; if(p.id===id && p.side===side) same.push(r); }
+    let prefix = '';
+    if(same.length >= 2){
+        const frontR = side === 2 ? Math.min.apply(null,same) : Math.max.apply(null,same);
+        prefix = (sr === frontR) ? '前' : '后';
+    }
+    const startCol = prefix ? '' : colLabel(sc, side);
+    let action, tail, dr = tr - sr;
+    if(id === 2 || id === 3 || id === 4){ // 马/象(相)/士(仕) 斜走，只有进退，尾标为目标列
+        const forward = side === 2 ? dr < 0 : dr > 0;
+        action = forward ? '进' : '退';
+        tail = colLabel(tc, side);
+    }else if(dr === 0){ // 直线子横走=平
+        action = '平'; tail = colLabel(tc, side);
+    }else{ // 直进/直退，尾标为格数
+        const forward = side === 2 ? dr < 0 : dr > 0;
+        action = forward ? '进' : '退';
+        tail = numLabel(Math.abs(dr), side);
+    }
+    return prefix + name + startCol + action + tail;
+}
+function preMoveCapture(sr,sc,tr,tc){ // 走子前调用：记下被吃子与记谱（此时棋盘未变）
+    return { captured: {...board[tr][tc]}, notation: buildNotation(sr,sc,tr,tc), moverSide: board[sr][sc].side };
+}
+
+// ---------- WebAudio 合成音效（无外部音频文件） ----------
+function ensureAudio(){
+    if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function blip(f1,f2,dur,type,vol){
+    if(!soundOn) return; ensureAudio(); if(!audioCtx) return;
+    const t = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type||'sine'; o.frequency.setValueAtTime(f1,t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1,f2), t+dur);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol||0.15,t+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function sfxMove(){ blip(320,160,0.09,'triangle',0.13); }
+function sfxCapture(){ blip(430,120,0.14,'sawtooth',0.16); }
+function sfxCheck(){ blip(520,780,0.15,'square',0.1); setTimeout(()=>blip(780,520,0.13,'square',0.09),90); }
+function sfxEnd(){ [523,392,330,262].forEach((f,i)=>setTimeout(()=>blip(f,f*0.98,0.18,'triangle',0.15),i*130)); }
+
+// ---------- 吃子栏 ----------
+const CAP_ORDER = {1:5,6:4,2:3,4:2,3:2,7:1};
+function sortCaptured(arr){ return arr.slice().sort((a,b)=>(CAP_ORDER[b]||0)-(CAP_ORDER[a]||0)); }
+function renderCaptured(){
+    const pieceHtml = (arr,side,cls)=> sortCaptured(arr).map(id=>`<span class="cap-piece ${cls}">${getPieceName(side,id)}</span>`).join('');
+    const red=document.getElementById('capByRed'), black=document.getElementById('capByBlack');
+    red.innerHTML = capturedByRed.length ? pieceHtml(capturedByRed,1,'cap-red') : '<span class="cap-empty">暂无</span>';
+    black.innerHTML = capturedByBlack.length ? pieceHtml(capturedByBlack,2,'cap-black') : '<span class="cap-empty">暂无</span>';
+}
+
+// ---------- 棋谱列表 ----------
+function renderMoveList(){
+    const box = document.getElementById('moveList');
+    let html = '<div class="move-grid">';
+    const cellCls = (i)=> 'mg ' + (reviewIndex===i ? 'review' : (reviewIndex===-1 && i===moveRecords.length-1 ? 'act' : ''));
+    for(let i=0;i<moveRecords.length;i+=2){
+        const red=moveRecords[i], black=moveRecords[i+1], no=i/2+1;
+        html += `<div class="mg mg-no">${no}.</div>`;
+        html += `<div class="${cellCls(i)}" data-i="${i}">${red.notation}${red.suffix||''}</div>`;
+        html += `<div class="${black?cellCls(i+1):'mg'}" data-i="${i+1}">${black?black.notation+(black.suffix||''):''}</div>`;
+    }
+    html += '</div>';
+    box.innerHTML = html;
+    box.querySelectorAll('.mg[data-i]').forEach(el=>{
+        el.onpointerdown=(e)=>{ e.preventDefault(); gotoReview(parseInt(el.dataset.i)); };
+    });
+}
+
+// ---------- 局面快照与复盘 ----------
+function takeSnapshot(){
+    return { board:JSON.parse(JSON.stringify(board)), turnRed, lastMove:lastMove?{...lastMove}:null, inCheckSide, gameOver };
+}
+function resetExt(){
+    moveRecords=[]; capturedByRed=[]; capturedByBlack=[]; evalHistory=[];
+    reviewIndex=-1; hintMove=null; gameResult=null; endReason='';
+    snapshots=[takeSnapshot()];
+}
+function loadSnapshot(k){
+    k=Math.max(0,Math.min(snapshots.length-1,k));
+    const s=snapshots[k];
+    board=JSON.parse(JSON.stringify(s.board)); turnRed=s.turnRed;
+    lastMove=s.lastMove?{...s.lastMove}:null; inCheckSide=s.inCheckSide;
+    selected=null; validMoves=[]; hintMove=null;
+    drawBoard(); renderPieces();
+}
+function gotoReview(i){ // i 为 moveRecords 下标，-1=开局
+    if(!snapshots.length) return;
+    reviewIndex = Math.max(-1, Math.min(i, moveRecords.length-1));
+    loadSnapshot(reviewIndex+1);
+    updateReviewTip(); refreshReviewButtons(); renderMoveList();
+}
+function gotoLive(){
+    reviewIndex=-1; loadSnapshot(snapshots.length-1);
+    updateReviewTip(); refreshReviewButtons(); renderMoveList();
+    if(!gameOver) infoDom.querySelector('div').innerText = turnRed?'红方走棋':'黑方走棋';
+}
+function stepReview(d){
+    let i = reviewIndex===-1 ? moveRecords.length-1 : reviewIndex;
+    i += d;
+    if(i < -1) i=-1;
+    if(i >= moveRecords.length-1){ gotoLive(); return; }
+    gotoReview(i);
+}
+function updateReviewTip(){
+    const t=document.getElementById('reviewTip');
+    if(reviewIndex===-1){ t.innerText=''; return; }
+    const m=moveRecords[reviewIndex];
+    t.innerText=`复盘模式：第 ${reviewIndex+1} 手 ${m.side===2?'红方':'黑方'} ${m.notation}${m.suffix||''}（点「回到当前」继续对弈）`;
+}
+function refreshReviewButtons(){
+    document.getElementById('rvPrev').disabled = reviewIndex<=-1;
+    document.getElementById('rvFirst').disabled = reviewIndex<=-1;
+    document.getElementById('rvNext').disabled = reviewIndex===-1;
+    document.getElementById('rvLive').disabled = reviewIndex===-1;
+}
+
+// ---------- 评估曲线 ----------
+function drawEvalChart(){
+    const cv=document.getElementById('evalChart'); if(!cv) return;
+    const c=cv.getContext('2d'), W=cv.width, H=cv.height;
+    c.clearRect(0,0,W,H);
+    c.fillStyle='#f7ecd8'; c.fillRect(0,0,W,H);
+    c.strokeStyle='#cbb089'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(0,H/2); c.lineTo(W,H/2); c.stroke();
+    const n=evalHistory.length; if(!n) return;
+    const xy=(v,i)=>{ const x=n===1?W/2:i/(n-1)*W;
+        const cl=Math.max(-MAX_EVAL,Math.min(MAX_EVAL,v));
+        return [x, H/2-(cl/MAX_EVAL)*(H/2-3)]; };
+    c.strokeStyle='#c40000'; c.lineWidth=2; c.beginPath();
+    evalHistory.forEach((v,i)=>{ const [x,y]=xy(v,i); i?c.lineTo(x,y):c.moveTo(x,y); });
+    c.stroke();
+    if(n===1){ const [x,y]=xy(evalHistory[0],0); c.fillStyle='#c40000'; c.beginPath(); c.arc(x,y,3,0,7); c.fill(); }
+}
+
+// ---------- 走子统一收口（在 board 已更新、turnRed 已翻转、判负完成后调用） ----------
+function afterMoveCommitted(sr,sc,tr,tc,pre,score){
+    const moverSide=pre.moverSide;
+    const rec={side:moverSide,sr,sc,tr,tc,pieceId:board[tr][tc].id,capturedId:pre.captured.id||0,notation:pre.notation,suffix:''};
+    if(pre.captured.id!==0){
+        if(moverSide===2) capturedByRed.push(pre.captured.id); else capturedByBlack.push(pre.captured.id);
+        sfxCapture();
+    }else sfxMove();
+    if(gameOver){ rec.suffix='杀'; sfxEnd(); }
+    else if(inCheckSide!==0){ rec.suffix='将'; sfxCheck(); }
+    moveRecords.push(rec);
+    snapshots.push(takeSnapshot());
+    const s = (score===null||score===undefined) ? -evaluateBoard() : score; // 红方视角
+    evalHistory.push(s);
+    renderCaptured(); renderMoveList(); drawEvalChart(); refreshReviewButtons();
+    saveCurrentGame();
+    if(gameOver) finishGameResult();
+}
+
+// ---------- 胜负结算弹窗 ----------
+let endReason='';
+function finishGameResult(){
+    const youWin = gameResult==='red' ? playerSide===2 : playerSide===1;
+    document.getElementById('resultTitle').innerText = youWin ? '🎉 你赢了！' : (gameResult==='red'?'红方胜利':'黑方胜利');
+    document.getElementById('resultDetail').innerHTML =
+        `对方${endReason||'无路可走'}，本局共 ${moveRecords.length} 手。<br>你执${playerSide===2?'红':'黑'}，${youWin?'获得胜利':'再接再厉'}`;
+    document.getElementById('resultModal').classList.add('show');
+    saveFinishedGame();
+    try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+}
+
+// ---------- 本地存档 / 续盘 / 历史对局 ----------
+function saveCurrentGame(){
+    if(gameOver) return;
+    try{
+        localStorage.setItem(SAVE_KEY, JSON.stringify({
+            board,turnRed,history,positionHistory,moveRecords,snapshots,capturedByRed,capturedByBlack,
+            evalHistory,lastMove,inCheckSide,playerSide,engineSkillLevel,ts:Date.now()
+        }));
+    }catch(e){}
+}
+function tryRestoreGame(){
+    let raw; try{ raw=localStorage.getItem(SAVE_KEY); }catch(e){ return false; }
+    if(!raw) return false;
+    try{
+        const d=JSON.parse(raw);
+        if(!d || !d.board || !(d.moveRecords||[]).length) return false;
+        board=d.board; turnRed=d.turnRed; history=d.history||[]; positionHistory=d.positionHistory||[];
+        moveRecords=d.moveRecords||[]; snapshots=d.snapshots||[]; capturedByRed=d.capturedByRed||[]; capturedByBlack=d.capturedByBlack||[];
+        evalHistory=d.evalHistory||[]; lastMove=d.lastMove||null; inCheckSide=d.inCheckSide||0;
+        playerSide=d.playerSide||2; engineSkillLevel=d.engineSkillLevel||10;
+        document.getElementById('sideSelect').value=String(playerSide);
+        document.getElementById('difficulty').value=String(engineSkillLevel);
+        gameOver=false; gameResult=null; reviewIndex=-1; selected=null; validMoves=[];
+        if(typeof zobristHash!=='undefined') zobristHash=computeHash();
+        document.getElementById('resumeText').innerText=`检测到上次未下完的对局（第 ${moveRecords.length} 手）`;
+        document.getElementById('resumeBar').classList.add('show');
+        return true;
+    }catch(e){ return false; }
+}
+function saveFinishedGame(){
+    try{
+        const list=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+        list.unshift({
+            ts:Date.now(), result:gameResult, reason:endReason, playerSide, total:moveRecords.length,
+            notation:moveRecords.map((m,i)=>(i%2===0?((i/2+1)+'. '):'')+m.notation+(m.suffix||'')).join(' ')
+        });
+        localStorage.setItem(GAMES_KEY, JSON.stringify(list.slice(0,30)));
+    }catch(e){}
+}
+function openGamesModal(){
+    const list=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+    const box=document.getElementById('gamesList');
+    if(!list.length){
+        box.innerHTML='<div style="text-align:center;color:#8a6040;padding:16px;">还没有已完成的对局，下完一局会自动保存在这里。</div>';
+    }else{
+        box.innerHTML=list.map((g,i)=>{
+            const d=new Date(g.ts);
+            const ts=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            const youWin=g.result==='red'?(g.playerSide===2):(g.playerSide===1);
+            return `<div class="game-item"><div class="gi-head"><span>${ts} · ${g.result==='red'?'红胜':'黑胜'}（${youWin?'你赢':'AI胜'}）· ${g.total}手 · ${g.reason||''}</span>`+
+                   `<button class="mini-btn ghost" data-del="${i}">删除</button></div><div class="gi-moves">${g.notation}</div></div>`;
+        }).join('');
+        box.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+            const l=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+            l.splice(parseInt(b.dataset.del),1); localStorage.setItem(GAMES_KEY,JSON.stringify(l)); openGamesModal();
+        });
+    }
+    document.getElementById('gamesModal').classList.add('show');
+}
+
+// ---------- 引擎着法提示 ----------
+async function showHint(){
+    if(gameOver||isAiThinking||hintBusy||reviewIndex!==-1) return;
+    const isPlayerTurn=(turnRed&&playerSide===2)||(!turnRed&&playerSide===1);
+    if(!isPlayerTurn) return;
+    if(!engineReady||!pikafishEngine){ infoDom.querySelector('div').innerText='引擎尚未就绪，暂时无法提示'; return; }
+    hintBusy=true;
+    const oldText=infoDom.querySelector('div').innerText;
+    infoDom.querySelector('div').innerText='正在计算推荐着法...';
+    try{
+        const bm=await pikafishEngine.go(boardToFEN(),500);
+        if(bm && bm!=='(none)'){
+            hintMove=parsePikafishMove(bm); drawBoard(); renderPieces();
+            setTimeout(()=>{ hintMove=null; drawBoard(); renderPieces(); },6000);
+        }
+    }catch(e){ infoDom.querySelector('div').innerText='提示失败'; }
+    hintBusy=false;
+    if(!gameOver && reviewIndex===-1) infoDom.querySelector('div').innerText=oldText;
+}
+
+// ---------- PWA 安装 ----------
+function initPWA(){
+    window.addEventListener('beforeinstallprompt',(e)=>{
+        e.preventDefault(); deferredInstallPrompt=e;
+        document.getElementById('installBtn').style.display='inline-block';
+    });
+    window.addEventListener('appinstalled',()=>{ document.getElementById('installBtn').style.display='none'; });
+    document.getElementById('installBtn').onclick=async()=>{
+        if(!deferredInstallPrompt){
+            alert('安装到桌面/主屏幕：\n安卓：浏览器菜单 →「添加到主屏幕」\niPhone：Safari 底部分享按钮 →「添加到主屏幕」');
+            return;
+        }
+        deferredInstallPrompt.prompt();
+        try{ await deferredInstallPrompt.userChoice; }catch(e){}
+        deferredInstallPrompt=null; document.getElementById('installBtn').style.display='none';
+    };
+}
+
+function renderExtAll(){ renderCaptured(); renderMoveList(); drawEvalChart(); updateReviewTip(); refreshReviewButtons(); }
+
+function bindExtEvents(){
+    const $=(id)=>document.getElementById(id);
+    $('hintBtn').onpointerdown=(e)=>{e.preventDefault();ensureAudio();showHint();};
+    $('soundBtn').onpointerdown=(e)=>{e.preventDefault();soundOn=!soundOn;$('soundBtn').innerText=soundOn?'🔊 声音':'🔇 静音';if(soundOn){ensureAudio();sfxMove();}};
+    $('movesBtn').onpointerdown=(e)=>{e.preventDefault();$('moveList').classList.toggle('show');renderMoveList();};
+    $('gamesBtn').onpointerdown=(e)=>{e.preventDefault();openGamesModal();};
+    $('rvFirst').onpointerdown=(e)=>{e.preventDefault();gotoReview(-1);};
+    $('rvPrev').onpointerdown=(e)=>{e.preventDefault();stepReview(-1);};
+    $('rvNext').onpointerdown=(e)=>{e.preventDefault();stepReview(1);};
+    $('rvLive').onpointerdown=(e)=>{e.preventDefault();gotoLive();};
+    $('resultRestart').onclick=()=>{$('resultModal').classList.remove('show');resetGame();};
+    $('resultReview').onclick=()=>{$('resultModal').classList.remove('show');$('moveList').classList.add('show');gotoReview(moveRecords.length-1);};
+    $('gamesClose').onpointerdown=(e)=>{e.preventDefault();$('gamesModal').classList.remove('show');};
+    $('gamesClear').onpointerdown=(e)=>{e.preventDefault();localStorage.removeItem(GAMES_KEY);openGamesModal();};
+    $('resumeYes').onpointerdown=(e)=>{e.preventDefault();$('resumeBar').classList.remove('show');
+        const aiTurn=turnRed?(playerSide===1):(playerSide===2); if(aiTurn&&engineReady) aiMove(); };
+    $('resumeNo').onpointerdown=(e)=>{e.preventDefault();$('resumeBar').classList.remove('show');try{localStorage.removeItem(SAVE_KEY);}catch(x){}resetGame();};
+    document.addEventListener('pointerdown',ensureAudio,{passive:true});
+}
+
+// ---------- 启动 ----------
+function bootstrap(){
+    resetGame(false);
+    bindExtEvents();
+    initPWA();
+    const restored = tryRestoreGame();
+    drawBoard(); renderPieces(); renderExtAll();
+    initPikafishEngine();
+    if(!restored && playerSide===1 && engineReady) aiMove();
+}
+bootstrap();
 
 // 注册 Service Worker：首次访问后缓存引擎与 NNUE，二次访问秒开并可离线对弈
 if ('serviceWorker' in navigator) {

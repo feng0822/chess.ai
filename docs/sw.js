@@ -11,7 +11,7 @@
  *
  * 更新引擎或页面后，把 CACHE_VERSION 加 1，旧缓存会在 activate 时自动清理。
  */
-const CACHE_VERSION = 'xiangqi-v4';
+const CACHE_VERSION = 'xiangqi-v5';
 const CORE_CACHE = CACHE_VERSION + '-core';
 const DATA_CACHE = CACHE_VERSION + '-data';
 
@@ -22,7 +22,9 @@ const CORE_ASSETS = [
     './pikafish-engine.js',
     './worker.js',
     './pikafish.js',
-    './pikafish.wasm'
+    './pikafish.wasm',
+    './manifest.webmanifest',
+    './icon.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -115,7 +117,7 @@ self.addEventListener('fetch', (event) => {
     }
 
     // 其他静态小文件：StaleWhileRevalidate
-    if (/\.(js|wasm|css|png|jpg|jpeg|gif|svg|ico|webp)$/.test(url.pathname)) {
+    if (/\.(js|wasm|css|png|jpg|jpeg|gif|svg|ico|webp|webmanifest)$/.test(url.pathname)) {
         event.respondWith(staleWhileRevalidate(req, CORE_CACHE, event));
     }
 });

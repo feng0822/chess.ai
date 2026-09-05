@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#703810"/>
+  <rect x="40" y="40" width="432" height="432" rx="56" fill="#ddb883"/>
+  <circle cx="256" cy="256" r="150" fill="#fff8f8" stroke="#222" stroke-width="10"/>
+  <circle cx="256" cy="256" r="122" fill="none" stroke="#c40000" stroke-width="8"/>
+  <text x="256" y="318" font-size="168" text-anchor="middle" fill="#c40000"
+        font-family="SimHei,Microsoft YaHei,sans-serif" font-weight="bold">帅</text>
+</svg>

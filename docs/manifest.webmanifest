@@ -1,0 +1,20 @@
+{
+  "name": "中国象棋 AI 对弈 - 皮卡鱼引擎",
+  "short_name": "中国象棋",
+  "description": "纯前端中国象棋人机对弈，内置皮卡鱼 Pikafish WASM 引擎，支持五档难度、复盘、棋谱、离线对弈。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f0e2cb",
+  "theme_color": "#703810",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
