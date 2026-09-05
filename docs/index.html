@@ -91,6 +91,9 @@ select{touch-action:manipulation;}
 #loading-status{font-size:13px;color:#8a6040;margin-top:8px;min-height:18px;}
 /* ===== 第一梯队扩展：吃子栏/复盘/棋谱/评估曲线/弹窗 ===== */
 #ext-panel{width:100%;max-width:468px;margin-top:8px;}
+.clock-row{display:flex;justify-content:center;align-items:center;gap:14px;font-size:13px;color:#5c3010;padding:2px 0 6px;}
+.clock-row .clk{font-variant-numeric:tabular-nums;font-weight:bold;}
+.clock-row .clk.active{color:#c40000;}
 .cap-row{display:flex;align-items:center;gap:4px;min-height:26px;font-size:13px;color:#5c3010;padding:2px 0;flex-wrap:wrap;}
 .cap-row .cap-label{font-weight:bold;margin-right:4px;min-width:52px;}
 .cap-piece{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;
@@ -191,6 +194,7 @@ select{touch-action:manipulation;}
 </div>
 </div>
 <div id="ext-panel">
+    <div id="clockRow" class="clock-row"></div>
     <div class="cap-row"><span class="cap-label">红吃：</span><span id="capByRed" class="cap-empty">暂无</span></div>
     <div class="cap-row"><span class="cap-label">黑吃：</span><span id="capByBlack" class="cap-empty">暂无</span></div>
     <div id="evalChartWrap"><canvas id="evalChart" width="468" height="54"></canvas></div>
@@ -290,6 +294,7 @@ let isAnalyzing = false;  // 玩家落子前引擎分析锁
 let qualityOn = true;     // 着法质量分析开关（默认开）
 const MATE_CP = 100000;   // 杀棋折算兵分
 let QUALITY_MOVETIME = 600; // 落子前质量分析用时(ms)，待 IS_TOUCH_DEVICE 定义后校准（避免暂时性死区）
+let redUsedMs=0, blackUsedMs=0, turnStartTs=0; // 双方累计用时、当前走子方起算时间戳
 const SAVE_KEY = 'xiangqi_current_v1';
 const GAMES_KEY = 'xiangqi_games_v1';
 
@@ -1509,6 +1514,7 @@ function takeSnapshot(){
 function resetExt(){
     moveRecords=[]; capturedByRed=[]; capturedByBlack=[]; evalHistory=[];
     reviewIndex=-1; hintMove=null; gameResult=null; endReason='';
+    redUsedMs=0; blackUsedMs=0; turnStartTs=Date.now();
     snapshots=[takeSnapshot()];
 }
 function loadSnapshot(k){
@@ -1580,11 +1586,13 @@ function afterMoveCommitted(sr,sc,tr,tc,pre,score){
     }else sfxMove();
     if(gameOver){ rec.suffix='杀'; sfxEnd(); }
     else if(inCheckSide!==0){ rec.suffix='将'; sfxCheck(); }
+    if(turnStartTs){ if(moverSide===2) redUsedMs+=Date.now()-turnStartTs; else blackUsedMs+=Date.now()-turnStartTs; }
+    turnStartTs=Date.now();
     moveRecords.push(rec);
     snapshots.push(takeSnapshot());
     const s = (score===null||score===undefined) ? -evaluateBoard() : score; // 红方视角
     evalHistory.push(s);
-    renderCaptured(); renderMoveList(); drawEvalChart(); refreshReviewButtons();
+    renderCaptured(); renderMoveList(); drawEvalChart(); refreshReviewButtons(); renderClock();
     saveCurrentGame();
     if(pendingQuality && moverSide===playerSide){
         pendingQuality.recIndex = moveRecords.length-1;
@@ -1611,7 +1619,7 @@ function saveCurrentGame(){
     try{
         localStorage.setItem(SAVE_KEY, JSON.stringify({
             board,turnRed,history,positionHistory,moveRecords,snapshots,capturedByRed,capturedByBlack,
-            evalHistory,lastMove,inCheckSide,playerSide,engineSkillLevel,ts:Date.now()
+            evalHistory,lastMove,inCheckSide,playerSide,engineSkillLevel,redUsedMs,blackUsedMs,ts:Date.now()
         }));
     }catch(e){}
 }
@@ -1624,6 +1632,7 @@ function tryRestoreGame(){
         board=d.board; turnRed=d.turnRed; history=d.history||[]; positionHistory=d.positionHistory||[];
         moveRecords=d.moveRecords||[]; snapshots=d.snapshots||[]; capturedByRed=d.capturedByRed||[]; capturedByBlack=d.capturedByBlack||[];
         evalHistory=d.evalHistory||[]; lastMove=d.lastMove||null; inCheckSide=d.inCheckSide||0;
+        redUsedMs=d.redUsedMs||0; blackUsedMs=d.blackUsedMs||0; turnStartTs=Date.now();
         playerSide=d.playerSide||2; engineSkillLevel=d.engineSkillLevel||10;
         document.getElementById('sideSelect').value=String(playerSide);
         document.getElementById('difficulty').value=String(engineSkillLevel);
@@ -1871,7 +1880,14 @@ function initPWA(){
     };
 }
 
-function renderExtAll(){ renderCaptured(); renderMoveList(); drawEvalChart(); updateReviewTip(); refreshReviewButtons(); }
+function fmtClock(ms){ ms=Math.max(0,ms|0); const sec=Math.floor(ms/1000); return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0'); }
+function renderClock(){
+    const el=document.getElementById('clockRow'); if(!el) return;
+    let r=redUsedMs, b=blackUsedMs;
+    if(turnStartTs && !gameOver && reviewIndex===-1){ if(turnRed) r+=Date.now()-turnStartTs; else b+=Date.now()-turnStartTs; }
+    el.innerHTML='<span class="clk '+(turnRed?'active':'')+'">红 '+fmtClock(r)+'</span><span>第 '+(moveRecords.length+1)+' 手</span><span class="clk '+(!turnRed?'active':'')+'">黑 '+fmtClock(b)+'</span>';
+}
+function renderExtAll(){ renderCaptured(); renderMoveList(); drawEvalChart(); updateReviewTip(); refreshReviewButtons(); renderClock(); }
 
 function bindExtEvents(){
     const $=(id)=>document.getElementById(id);
@@ -1900,6 +1916,7 @@ function bindExtEvents(){
 
 // ---------- 启动 ----------
 function bootstrap(){
+    setInterval(renderClock,1000);
     resetGame(false);
     bindExtEvents();
     initPWA();
