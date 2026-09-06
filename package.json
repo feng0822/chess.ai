@@ -3,11 +3,14 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "纯前端中国象棋 AI 对弈（皮卡鱼 WASM + 本地 Minimax 降级），含规则内核与单元测试",
+  "description": "纯前端中国象棋 AI 对弈（皮卡鱼 WASM + 本地 Minimax 降级），含纯规则内核与单元测试",
   "scripts": {
     "test": "node --test",
+    "serve": "node scripts/serve.mjs",
     "check:rules": "node --check docs/js/rules.js",
-    "serve": "node scripts/serve.mjs"
+    "check:inline": "node scripts/check-inline-module.cjs",
+    "check:js": "node --check docs/js/rules.js && node --check docs/pikafish-engine.js && node --check docs/worker.js && node --check docs/sw.js",
+    "verify": "npm run check:inline && npm run check:js && npm test"
   },
   "engines": {
     "node": ">=18"
