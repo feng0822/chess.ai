@@ -66,6 +66,7 @@ select{touch-action:manipulation;}
 .piece-red{background:#fff8f8;color:#c40000}
 .piece-black{background:#1a1a1a;color:#f8f8f8}
 .piece.selected{box-shadow:0 0 0 4px #0088ff}
+.piece.dragging{transition:none!important;transform:scale(1.18);z-index:40;box-shadow:0 10px 20px rgba(0,0,0,.4);cursor:grabbing;opacity:.95;}
 #eval-bar-wrap{width:100%;margin:4px 0 8px;}
 #eval-bar{position:relative;height:18px;border-radius:4px;overflow:hidden;border:1px solid #5c3010;}
 #eval-red{position:absolute;left:0;top:0;height:100%;background:#c40000;width:50%;transition:width 0.4s ease;}
@@ -1152,6 +1153,58 @@ function drawBoard(){
 }
 
 
+// 为棋子绑定“点选 + 拖拽落子”：未移动=点选（原逻辑），移动超过阈值=拖拽跟手，松手在合法格即落子
+function bindPieceDrag(div,r,c){
+    div.onpointerdown=(e)=>{
+        e.preventDefault();
+        if(gameOver||isAiThinking||isAnalyzing) return;
+        if(reviewIndex!==-1){ gotoLive(); return; }
+        const isPlayerTurn=(turnRed&&playerSide===2)||(!turnRed&&playerSide===1);
+        if(!isPlayerTurn) return;
+        const item=board[r][c];
+        if(item.id===0||item.side!==playerSide){ click(r,c); return; }
+        try{ div.setPointerCapture(e.pointerId); }catch(_){}
+        const rect=boardWrap.getBoundingClientRect();
+        const sx=rect.width?rect.width/BOARD_DESIGN_W:1;
+        const sy=rect.height?rect.height/BOARD_DESIGN_H:1;
+        const startX=e.clientX,startY=e.clientY;
+        let dragging=false;
+        const design=(ev)=>({x:(ev.clientX-rect.left)/sx, y:(ev.clientY-rect.top)/sy});
+        const moveH=(ev)=>{
+            if(!dragging){
+                const dx=(ev.clientX-startX)/sx, dy=(ev.clientY-startY)/sy;
+                if(Math.hypot(dx,dy) <= 14) return;
+                dragging=true;
+                selected={r,c}; validMoves=getAllValid(r,c); drawBoard();
+                div.classList.add('dragging');
+            }
+            const p=design(ev);
+            div.style.left=(p.x-23)+'px';
+            div.style.top=(p.y-23)+'px';
+        };
+        const upH=(ev)=>{
+            div.removeEventListener('pointermove',moveH);
+            div.removeEventListener('pointerup',upH);
+            div.removeEventListener('pointercancel',upH);
+            div.classList.remove('dragging');
+            if(dragging){
+                const p=design(ev);
+                let tc=Math.round((p.x-ox)/cell), tr=Math.round((p.y-oy)/cell);
+                if(boardFlipped()){ tr=9-tr; tc=8-tc; }
+                if(tr>=0&&tr<=9&&tc>=0&&tc<=8&&simulateMove(r,c,tr,tc)){
+                    commitPlayerMove(r,c,tr,tc);
+                }else{
+                    renderPieces(); // 非法落点：回弹原位
+                }
+            }else{
+                click(r,c); // 没有拖动 = 普通点选
+            }
+        };
+        div.addEventListener('pointermove',moveH);
+        div.addEventListener('pointerup',upH);
+        div.addEventListener('pointercancel',upH);
+    };
+}
 function renderPieces(){
     document.querySelectorAll(".piece").forEach(p=>p.remove());
     for(let r=0;r<10;r++){
@@ -1164,7 +1217,7 @@ function renderPieces(){
             div.style.left = (ox + viewC(c)*cell - 23) + "px";
             div.style.top = (oy + viewR(r)*cell - 23) + "px";
             div.dataset.pos = r + "_" + c;
-            div.onpointerdown = (e)=>{ e.preventDefault(); click(r,c); };
+            bindPieceDrag(div,r,c);
             if(selected && selected.r===r && selected.c===c){
                 div.classList.add("selected");
             }
