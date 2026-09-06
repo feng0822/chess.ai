@@ -1,0 +1,15 @@
+{
+  "name": "xiangqi-ai-web",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "纯前端中国象棋 AI 对弈（皮卡鱼 WASM + 本地 Minimax 降级），含规则内核与单元测试",
+  "scripts": {
+    "test": "node --test",
+    "check:rules": "node --check docs/js/rules.js",
+    "serve": "node scripts/serve.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

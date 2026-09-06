@@ -20,3 +20,7 @@ Thumbs.db
 # Temp
 *.7z
 screenshot*.png
+
+# 依赖（本项目测试零依赖，仅以防万一）
+node_modules/
+
