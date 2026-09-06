@@ -11,7 +11,7 @@
  *
  * 更新引擎或页面后，把 CACHE_VERSION 加 1，旧缓存会在 activate 时自动清理。
  */
-const CACHE_VERSION = 'xiangqi-v6';
+const CACHE_VERSION = 'xiangqi-v7';
 const CORE_CACHE = CACHE_VERSION + '-core';
 const DATA_CACHE = CACHE_VERSION + '-data';
 
@@ -19,6 +19,7 @@ const DATA_CACHE = CACHE_VERSION + '-data';
 const CORE_ASSETS = [
     './',
     './index.html',
+    './js/rules.js',
     './pikafish-engine.js',
     './worker.js',
     './pikafish.js',
