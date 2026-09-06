@@ -18,6 +18,8 @@ class PikafishEngine {
         this._lastInfo = null;      // 最近一条 multipv=1 的 info（含 score/pv）
         this._pvLines = {};         // multipv 序号 -> 最新 info（多路线分析）
         this._multiPV = 1;          // 当前 MultiPV 设置
+        this.onCrash = options.onCrash || null; // 运行期 Worker 崩溃回调（初始化完成后）
+        this._crashed = false;
         // 皮卡鱼无 "Skill Level" 选项，用搜索深度区分五档强度
         this.searchDepth = 10;
     }
@@ -55,6 +57,14 @@ class PikafishEngine {
 
             this.worker.onerror = (err) => {
                 clearTimeout(timeout);
+                if (this.ready) {
+                    // 初始化已完成 -> 属于运行期 Worker 崩溃：标记失活并通知外部自愈，不再 reject（Promise 已解决）
+                    this.ready = false; this._crashed = true;
+                    try { if (this.worker) this.worker.terminate(); } catch (x) {}
+                    this.worker = null;
+                    if (this.onCrash) { try { this.onCrash(err); } catch (x) {} }
+                    return;
+                }
                 reject(new Error('Worker错误: ' + err.message + ' (文件:' + err.filename + ':' + err.lineno + ')'));
             };
 

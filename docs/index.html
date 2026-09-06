@@ -317,6 +317,59 @@ const CPU_CORES = navigator.hardwareConcurrency || 4;
 const ENGINE_MOVETIME = IS_TOUCH_DEVICE ? 1200 : (CPU_CORES >= 8 ? 2000 : 1500); // 每步思考时间(ms)
 QUALITY_MOVETIME = IS_TOUCH_DEVICE ? 450 : 600;
 
+// 构造一个皮卡鱼引擎实例（初始化与崩溃自愈共用，保证选项一致）
+function makeEngine(){
+    return new PikafishEngine({
+        wasmUrl: 'worker.js',
+        onProgress: (text) => {
+            infoDom.querySelector("div").innerText = text;
+            loadingStatus.innerText = text;
+        },
+        onDownloadProgress: (loaded, total, percent) => {
+            if (total > 0) {
+                progressBar.style.width = percent + "%";
+                const mb = (loaded / 1048576).toFixed(1);
+                const totalMb = (total / 1048576).toFixed(0);
+                progressText.innerText = percent + "%  (" + mb + " / " + totalMb + " MB)";
+            } else {
+                const mb = (loaded / 1048576).toFixed(1);
+                progressText.innerText = "已下载 " + mb + " MB...";
+            }
+        },
+        onInfo: (info) => {
+            if (info.score !== undefined && info.scoreType === 'cp') {
+                const sv = (aiSideVal() === 1) ? -info.score : info.score;
+                updateEvalFromScore(sv);
+            }
+        },
+        onCrash: handleEngineCrash
+    });
+}
+let engineCrashCount = 0;   // 连续崩溃次数，超过上限则稳定降级到本地 AI，避免反复重启抖动
+let engineRestarting = false;
+async function handleEngineCrash(err){
+    engineReady = false;
+    console.error('[引擎] 运行期 Worker 崩溃：', err);
+    if(engineRestarting) return;
+    if(engineCrashCount >= 2){
+        try{ infoDom.querySelector("div").innerText = "引擎多次异常，已自动切换本地 AI"; }catch(e){}
+        return;
+    }
+    engineRestarting = true; engineCrashCount++;
+    try{ infoDom.querySelector("div").innerText = "引擎异常，正在自动恢复…"; }catch(e){}
+    try{
+        if(pikafishEngine){ try{ pikafishEngine.quit(); }catch(x){} }
+        pikafishEngine = makeEngine();
+        await pikafishEngine.init();
+        if(engineLoadCancelled){ engineRestarting=false; return; }
+        pikafishEngine.setSkillLevel(engineSkillLevel);
+        engineReady = true; engineRestarting = false;
+        try{ infoDom.querySelector("div").innerText = "皮卡鱼引擎已恢复"; }catch(e){}
+    }catch(e){
+        engineRestarting = false; engineReady = false;
+        try{ infoDom.querySelector("div").innerText = "引擎恢复失败，使用本地 AI 对弈"; }catch(x){}
+    }
+}
 async function initPikafishEngine() {
     infoDom.querySelector("div").innerText = "正在加载皮卡鱼引擎...";
     loadingStatus.innerText = "初始化 Web Worker...";
@@ -325,31 +378,8 @@ async function initPikafishEngine() {
         if (!engineReady) loadingFallback.style.display = "block";
     }, 15000);
     try {
-        pikafishEngine = new PikafishEngine({
-            wasmUrl: 'worker.js',
-            onProgress: (text) => {
-                infoDom.querySelector("div").innerText = text;
-                loadingStatus.innerText = text;
-            },
-            onDownloadProgress: (loaded, total, percent) => {
-                if (total > 0) {
-                    progressBar.style.width = percent + "%";
-                    const mb = (loaded / 1048576).toFixed(1);
-                    const totalMb = (total / 1048576).toFixed(0);
-                    progressText.innerText = percent + "%  (" + mb + " / " + totalMb + " MB)";
-                } else {
-                    const mb = (loaded / 1048576).toFixed(1);
-                    progressText.innerText = "已下载 " + mb + " MB...";
-                }
-            },
-            onInfo: (info) => {
-                // 思考中实时更新评估条
-                if (info.score !== undefined && info.scoreType === 'cp') {
-                    const s = (aiSideVal() === 1) ? -info.score : info.score;
-                    updateEvalFromScore(s);
-                }
-            }
-        });
+        engineCrashCount = 0;
+        pikafishEngine = makeEngine();
         await pikafishEngine.init();
         clearTimeout(fallbackTimer);
         if (engineLoadCancelled) return;
@@ -1358,6 +1388,24 @@ function finishGameResult(){
     try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
 }
 
+// ---------- 健壮性：安全读取存档 / 转义 ----------
+// 读取 localStorage 中的 JSON；若数据损坏或被篡改，清除坏键并回退，绝不让解析错误中断整局（避免白屏）
+function safeReadJSON(key, fallback){
+    let raw=null;
+    try{ raw=localStorage.getItem(key); }catch(e){ return fallback; }
+    if(raw==null) return fallback;
+    try{ return JSON.parse(raw); }
+    catch(e){
+        try{ localStorage.removeItem(key); }catch(_){}
+        console.warn('[存档] '+key+' 数据损坏，已自动重置');
+        return fallback;
+    }
+}
+// 任何来自存档/异常对象的文本写入 innerHTML 前先转义，防止注入
+function escapeHtml(v){
+    return String(v==null?'':v).replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
 // ---------- 本地存档 / 续盘 / 历史对局 ----------
 function saveCurrentGame(){
     if(gameOver) return;
@@ -1372,7 +1420,7 @@ function tryRestoreGame(){
     let raw; try{ raw=localStorage.getItem(SAVE_KEY); }catch(e){ return false; }
     if(!raw) return false;
     try{
-        const d=JSON.parse(raw);
+        const d=safeReadJSON(SAVE_KEY,null);
         if(!d || !d.board || !(d.moveRecords||[]).length) return false;
         board=d.board; turnRed=d.turnRed; history=d.history||[]; positionHistory=d.positionHistory||[];
         moveRecords=d.moveRecords||[]; snapshots=d.snapshots||[]; capturedByRed=d.capturedByRed||[]; capturedByBlack=d.capturedByBlack||[];
@@ -1390,7 +1438,7 @@ function tryRestoreGame(){
 }
 function saveFinishedGame(){
     try{
-        const list=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+        const list=safeReadJSON(GAMES_KEY,[]);
         list.unshift({
             ts:Date.now(), result:gameResult, reason:endReason, playerSide, total:moveRecords.length,
             notation:moveRecords.map((m,i)=>(i%2===0?((i/2+1)+'. '):'')+m.notation+(m.suffix||'')).join(' ')
@@ -1399,7 +1447,7 @@ function saveFinishedGame(){
     }catch(e){}
 }
 function openGamesModal(){
-    const list=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+    const list=safeReadJSON(GAMES_KEY,[]);
     const box=document.getElementById('gamesList');
     if(!list.length){
         box.innerHTML='<div style="text-align:center;color:#8a6040;padding:16px;">还没有已完成的对局，下完一局会自动保存在这里。</div>';
@@ -1408,11 +1456,11 @@ function openGamesModal(){
             const d=new Date(g.ts);
             const ts=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
             const youWin=g.result==='red'?(g.playerSide===2):(g.playerSide===1);
-            return `<div class="game-item"><div class="gi-head"><span>${ts} · ${g.result==='red'?'红胜':'黑胜'}（${youWin?'你赢':'AI胜'}）· ${g.total}手 · ${g.reason||''}</span>`+
-                   `<button class="mini-btn ghost" data-del="${i}">删除</button></div><div class="gi-moves">${g.notation}</div></div>`;
+            return `<div class="game-item"><div class="gi-head"><span>${ts} · ${g.result==='red'?'红胜':'黑胜'}（${youWin?'你赢':'AI胜'}）· ${escapeHtml(g.total)}手 · ${escapeHtml(g.reason||'')}</span>`+
+                   `<button class="mini-btn ghost" data-del="${i}">删除</button></div><div class="gi-moves">${escapeHtml(g.notation||'')}</div></div>`;
         }).join('');
         box.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
-            const l=JSON.parse(localStorage.getItem(GAMES_KEY)||'[]');
+            const l=safeReadJSON(GAMES_KEY,[]);
             l.splice(parseInt(b.dataset.del),1); localStorage.setItem(GAMES_KEY,JSON.stringify(l)); openGamesModal();
         });
     }
@@ -1474,7 +1522,7 @@ async function analyzePosition(){
             html+="<div class=\"ap-line\"><span class=\"ap-no\">"+(idx+1)+"</span><span class=\"ap-score\">"+score+"</span><span class=\"ap-pv\">"+pvs+"</span></div>";
         });
         panel.innerHTML=html;
-    }catch(e){ panel.innerHTML="<div>分析失败："+e.message+"</div>"; }
+    }catch(e){ panel.innerHTML="<div>分析失败："+escapeHtml(e.message)+"</div>"; }
     analyzeBusy=false; btn.disabled=false; btn.innerText=oldTxt;
 }
 // ---------- 第二梯队：着法质量评估 ----------
@@ -1670,9 +1718,29 @@ function bootstrap(){
 bootstrap();
 
 // 注册 Service Worker：首次访问后缓存引擎与 NNUE，二次访问秒开并可离线对弈
+// 新版本更新提示：后台装好新版 SW 且当前正被旧版控制时，浮出提示条，点击刷新
+function showUpdateToast(){
+    if(document.getElementById('updateToast')) return;
+    const t=document.createElement('div');
+    t.id='updateToast';
+    t.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#5c3010;color:#fff5e6;padding:10px 18px;border-radius:22px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.28);z-index:9999;cursor:pointer;';
+    t.innerText='发现新版本，点击刷新';
+    t.onclick=()=>location.reload();
+    document.body.appendChild(t);
+}
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch((e) => {
+        navigator.serviceWorker.register('sw.js').then((reg)=>{
+            reg.addEventListener('updatefound',()=>{
+                const nw=reg.installing; if(!nw) return;
+                nw.addEventListener('statechange',()=>{
+                    // installed 且已有 controller = 旧版正控制本页、新版已在后台装好
+                    if(nw.state==='installed' && navigator.serviceWorker.controller){
+                        showUpdateToast();
+                    }
+                });
+            });
+        }).catch((e) => {
             console.warn('Service Worker 注册失败（不影响本次对弈）:', e);
         });
     });
