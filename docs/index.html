@@ -159,6 +159,18 @@ select{touch-action:manipulation;}
 .ap-btn-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
 #exportText{width:100%;height:190px;font-size:12px;line-height:1.7;padding:8px;border:1px solid #cbb089;border-radius:4px;background:#fbf3e4;color:#3a2010;font-family:Consolas,monospace;resize:vertical;}
 #exportModal .modal-box{max-width:420px;}
+/* 宽屏：左右分栏一屏放下，手机端保持单列 */
+@media (min-width: 980px){
+  body{flex-direction:row;flex-wrap:wrap;align-items:flex-start;justify-content:center;padding:10px 16px;}
+  #info-bar{flex-basis:100%;max-width:none;margin-bottom:6px;}
+  #resumeBar{flex-basis:100%;max-width:none;}
+  #boardScaleWrap{margin-right:22px;}
+  #ext-panel{flex:0 0 380px;max-width:none;margin-top:0;}
+  .btn-group{margin-top:4px;gap:4px 6px;}
+  #moveList{max-height:120px;}
+  #evalChart{height:44px;}
+  .clock-row{padding:0 0 4px;}
+}
 </style>
 </head>
 <body>
@@ -441,7 +453,13 @@ const scaleWrap = document.getElementById("boardScaleWrap");
 const BOARD_DESIGN_W = 468, BOARD_DESIGN_H = 520;
 function fitBoard(){
     const availW = Math.min(BOARD_DESIGN_W, window.innerWidth - 16);
-    const scale = Math.min(1, availW / BOARD_DESIGN_W);
+    // 宽屏左右分栏时，额外按可用视口高度缩放棋盘，保证整页一屏放下
+    let availH = BOARD_DESIGN_H;
+    if(window.innerWidth >= 980){
+        const infoH = document.getElementById('info-bar').offsetHeight;
+        availH = Math.max(320, window.innerHeight - infoH - 36);
+    }
+    const scale = Math.min(1, availW / BOARD_DESIGN_W, availH / BOARD_DESIGN_H);
     boardWrap.style.transform = "scale(" + scale + ")";
     scaleWrap.style.width = (BOARD_DESIGN_W * scale) + "px";
     scaleWrap.style.height = (BOARD_DESIGN_H * scale) + "px";
