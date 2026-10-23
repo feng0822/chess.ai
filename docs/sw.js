@@ -11,7 +11,7 @@
  *
  * 鏇存柊寮曟搸鎴栭〉闈㈠悗锛屾妸 CACHE_VERSION 鍔?1锛屾棫缂撳瓨浼氬湪 activate 鏃惰嚜鍔ㄦ竻鐞嗐€?
  */
-const CACHE_VERSION = 'xiangqi-v11';
+const CACHE_VERSION = 'xiangqi-v12';
 const CORE_CACHE = CACHE_VERSION + '-core';
 const DATA_CACHE = CACHE_VERSION + '-data';
 
