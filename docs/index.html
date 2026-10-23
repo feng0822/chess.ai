@@ -329,6 +329,10 @@ let evalHistory = [];     // 每步之后的红方视角评估分
 let reviewIndex = -1;     // 复盘位置：-1=当前实时局面，>=0=正在看第几步之后
 let hintMove = null;      // 引擎提示着法 {sr,sc,tr,tc}
 let demoArrow = null;       // 残局/分析推荐着法箭头 {sr,sc,tr,tc}
+let lastAnalyzePV = [];     // 最近一次分析的第一条路线(UCI着法数组)
+let demoPV = null;          // 残局演示路线
+let demoPvIdx = 0;
+let demoMode = false;
 let demoLocked = false;     // 残局演示模式：锁定棋盘，棋子不可再走
 let hintBusy = false;     // 正在向引擎求提示，锁住棋盘避免并发
 let gameResult = null;    // 'red' | 'black' | null
@@ -637,14 +641,7 @@ function updateEvaluation(){
     evalRed.style.width = pct + "%";
     evalBlack.style.width = (100 - pct) + "%";
     evalIndicator.style.left = pct + "%";
-    let rounded = Math.round(evalScore);
-    if(Math.abs(rounded) < 8){
-        evalText.innerText = "均势";
-    }else if(rounded > 0){
-        evalText.innerText = "红方占优 " + rounded;
-    }else{
-        evalText.innerText = "黑方占优 " + (-rounded);
-    }
+    evalText.innerText = evalToText(clamped, 0);
 }
 
 // ========== PST 棋子位置价值表（红方视角，row0=黑方底线，row9=红方底线）==========
@@ -1009,10 +1006,7 @@ function updateEvalFromScore(score){
     evalRed.style.width = pct + "%";
     evalBlack.style.width = (100 - pct) + "%";
     evalIndicator.style.left = pct + "%";
-    let rounded = Math.round(score);
-    if(Math.abs(rounded) < 8){ evalText.innerText = "均势"; }
-    else if(rounded > 0){ evalText.innerText = "红方占优 " + rounded; }
-    else { evalText.innerText = "黑方占优 " + (-rounded); }
+    evalText.innerText = evalToText(score, 0);
 }
 
 // AI走棋：皮卡鱼 WASM 引擎（本地浏览器运行），失败降级本地AI
@@ -1115,6 +1109,7 @@ function handleClick(r,c){
         return;
     }
     if(simulateMove(sr,sc,r,c)){
+        if(demoMode){ demoPlayMove(sr,sc,r,c); return; }
         commitPlayerMove(sr,sc,r,c);
         return;
     }
@@ -1655,14 +1650,21 @@ function pvToNotations(uciList, board0, maxSteps){
     return out;
 }
 // 一条 info 的评分转成红视角文字
-function lineScoreText(ln, sideTurnRed){
-    if(ln.mate!==undefined && ln.mate!==null && ln.mate!==0){
-        const winner = ln.mate>0 ? (sideTurnRed?"红":"黑") : (sideTurnRed?"黑":"红");
-        return winner+"方"+Math.abs(ln.mate)+"步杀";
+// 局面评分文案（天天象棋口径：100厘兵=1兵；<0.5兵均势；杀棋显N步杀）
+function evalToText(cp, mate){
+    if(mate!==undefined && mate!==null && mate!==0){
+        return (mate>0?"红":"黑")+"方"+Math.abs(mate)+"步杀";
     }
-    if(typeof ln.score!=="number") return "均势";
-    const red = sideTurnRed ? ln.score/100 : -ln.score/100;
-    return (red>=0?"+":"")+red.toFixed(2);
+    if(typeof cp!=="number" || isNaN(cp)) return "均势";
+    const v=cp/100, a=Math.abs(v);
+    if(a<0.5) return "均势";
+    const who=v>0?"红":"黑", lv=a<1.5?"方略优":a<3.0?"方优势":a<5.0?"方大优":"方胜势";
+    return who+lv+" "+(v>0?"+":"")+v.toFixed(1);
+}
+function lineScoreText(ln, sideTurnRed){
+    if(typeof ln.score!=="number" && !(ln.mate!==undefined && ln.mate!==null && ln.mate!==0)) return "均势";
+    const cp = (typeof ln.score==="number") ? (sideTurnRed?ln.score:-ln.score) : 0;
+    return evalToText(cp, ln.mate);
 }
 // 对当前（复盘或实时）局面做多路线分析
 async function analyzePosition(){
@@ -1684,9 +1686,36 @@ async function analyzePosition(){
             html+="<div class=\"ap-line\"><span class=\"ap-no\">"+(idx+1)+"</span><span class=\"ap-score\">"+score+"</span><span class=\"ap-pv\">"+pvs+"</span></div>";
         });
         panel.innerHTML=html;
-        try{ const fp=lines[0]&&lines[0].pv&&lines[0].pv[0]; demoArrow=fp?parsePikafishMove(fp):null; drawBoard(); }catch(_){}
+        lastAnalyzePV=(lines[0]&&lines[0].pv)||[];
+        try{ const fp=lastAnalyzePV[0]; demoArrow=fp?parsePikafishMove(fp):null; drawBoard(); }catch(_){}
     }catch(e){ panel.innerHTML="<div>分析失败："+escapeHtml(e.message)+"</div>"; }
     analyzeBusy=false; btn.disabled=false; btn.innerText=oldTxt;
+}
+// 残局演示：沿推荐路线逐步走，黑应手自动落子，箭头刷新
+function demoPlayMove(sr,sc,r,c){
+  const uci=moveToUci(sr,sc,r,c);
+  if(!demoPV||demoPvIdx>=demoPV.length||uci!==demoPV[demoPvIdx]){
+    demoMode=false; demoPV=null; demoArrow=null; selected=null; validMoves=[];
+    drawBoard(); renderPieces();
+    infoDom.querySelector('div').innerText='已脱离推荐路线，箭头已清除（可再点“开始 AI 分析”重新看推荐）';
+    return;
+  }
+  board[r][c]={...board[sr][sc]}; board[sr][sc]={side:0,id:0};
+  turnRed=!turnRed; demoPvIdx++;
+  if(demoPvIdx<demoPV.length){
+    const m=parsePikafishMove(demoPV[demoPvIdx]);
+    board[m.tr][m.tc]={...board[m.sr][m.sc]}; board[m.sr][m.sc]={side:0,id:0};
+    turnRed=!turnRed; demoPvIdx++;
+  }
+  selected=null; validMoves=[];
+  if(demoPvIdx<demoPV.length){
+    demoArrow=parsePikafishMove(demoPV[demoPvIdx]);
+    infoDom.querySelector('div').innerText='推荐路线演示中（蓝箭头指当前该方最佳着）';
+  }else{
+    demoArrow=null; demoMode=false; demoPV=null;
+    infoDom.querySelector('div').innerText='推荐路线走完';
+  }
+  drawBoard(); renderPieces();
 }
 // ---------- 摆残局编辑器：手动摆局面，让皮卡鱼分析最优下法 ----------
 const EDIT_PIECE_DEFS=[
@@ -1743,7 +1772,7 @@ function exitEditMode(restore){
     board=JSON.parse(JSON.stringify(preEditBoard)); turnRed=preEditTurnRed;
   }
   editMode=false; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
-  demoArrow=null; demoLocked=false;
+  demoArrow=null; demoLocked=false; demoMode=false; demoPV=null; lastAnalyzePV=[];
   document.getElementById('editBar').classList.remove('show');
   drawBoard(); renderPieces(); updateEvaluation();
 }
@@ -1769,7 +1798,11 @@ async function analyzeCustom(){
   document.getElementById('editBar').classList.remove('show');
   drawBoard(); renderPieces();
   await analyzePosition();
-  infoDom.querySelector('div').innerText='残局分析完成（当前轮到 '+(turnRed?'红':'黑')+' 方走子）';
+  demoPV=lastAnalyzePV; demoPvIdx=0;
+  demoArrow=demoPV&&demoPV[0]?parsePikafishMove(demoPV[0]):null;
+  demoMode=true;
+  infoDom.querySelector('div').innerText='按蓝箭头走红方推荐着法，黑方应手自动演示；箭头自动刷新';
+  drawBoard(); renderPieces();
 }
 // ---------- 第二梯队：着法质量评估 ----------
 // 棋盘坐标 -> 皮卡鱼 UCI（parsePikafishMove 的逆运算）
