@@ -140,6 +140,17 @@ select{touch-action:manipulation;}
 #analyzePanel{display:none;margin-top:6px;background:#f7ecd8;border:1px solid #cbb089;border-radius:4px;padding:8px 10px;font-size:13px;color:#5c3010;}
 #analyzePanel.show{display:block;}
 #analyzePanel .ap-title{font-weight:bold;margin-bottom:4px;color:#703810;}
+#editBar{display:none;margin-top:6px;background:#eef3fb;border:1px solid #b9c9e2;border-radius:6px;padding:8px 10px;font-size:13px;color:#1f3864;}
+#editBar.show{display:block;}
+#editBar .eb-title{font-weight:bold;margin-bottom:6px;line-height:1.5;}
+#editBar .eb-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;}
+#editBar .eb-row:last-child{margin-bottom:0;}
+#editBar .eb-piece{width:30px;height:30px;padding:0;border:1px solid #999;border-radius:4px;background:#fff;line-height:28px;text-align:center;font-weight:bold;cursor:pointer;font-size:15px;}
+#editBar .eb-piece.red{color:#c0392b;border-color:#c0392b;}
+#editBar .eb-piece.black{color:#2c3e50;border-color:#2c3e50;}
+#editBar .eb-piece.sel{outline:2px solid #1f3864;background:#dbe7fb;}
+#editBar .eb-piece.erase{color:#888;font-size:12px;width:auto;padding:0 8px;}
+#editBar .mini-btn.on{background:#1f3864;color:#fff;border-color:#1f3864;}
 .ap-line{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px dashed #e0c9a6;}
 .ap-line:last-child{border-bottom:none;}
 .ap-no{width:18px;font-weight:bold;color:#703810;}
@@ -206,8 +217,20 @@ select{touch-action:manipulation;}
         <button class="mini-btn ghost" id="rvNext">下一步 ▶</button>
         <button class="mini-btn" id="rvLive">回到当前</button>
         <button class="mini-btn" id="analyzeBtn">🔍 分析局面</button>
+        <button class="mini-btn" id="editBtn">🛠 摆残局</button>
     </div>
     <div id="analyzePanel"></div>
+<div id="editBar">
+  <div class="eb-title">🛠 摆残局模式：先点选下方棋子，再点棋盘对应位置摆放；选“橡皮”后点格子可清除。</div>
+  <div class="eb-row" id="ebPieces"></div>
+  <div class="eb-row">
+    <button class="mini-btn" id="ebClear">清空棋盘</button>
+    <button class="mini-btn" id="ebTurnRed">红先</button>
+    <button class="mini-btn" id="ebTurnBlack">黑先</button>
+    <button class="mini-btn" id="ebAnalyze">✓ 开始 AI 分析</button>
+    <button class="mini-btn ghost" id="ebExit">✕ 退出并还原原局</button>
+  </div>
+</div>
     <div id="moveList"></div>
 </div>
 <div id="resultModal" class="modal-mask">
@@ -305,6 +328,11 @@ let qualityOn = true;     // 着法质量分析开关（默认开）
 const MATE_CP = 100000;   // 杀棋折算兵分
 let QUALITY_MOVETIME = 600; // 落子前质量分析用时(ms)，待 IS_TOUCH_DEVICE 定义后校准（避免暂时性死区）
 let redUsedMs=0, blackUsedMs=0, turnStartTs=0; // 双方累计用时、当前走子方起算时间戳
+// ===== 摆残局编辑器状态 =====
+let editMode=false;        // 是否处于摆残局编辑模式
+let editPiece=null;        // 当前选中的编辑棋子 {side,id}，或 'erase'
+let preEditBoard=null;     // 进入编辑前对局局面快照，退出时还原
+let preEditTurnRed=true;
 const SAVE_KEY = 'xiangqi_current_v1';
 const GAMES_KEY = 'xiangqi_games_v1';
 
@@ -1042,6 +1070,7 @@ canvas.onpointerdown = function(e){
 }
 
 function handleClick(r,c){
+    if(editMode){ editPlace(r,c); return; }
     if(gameOver || isAiThinking || hintBusy || isAnalyzing) return;
     if(reviewIndex!==-1){ gotoLive(); return; } // 复盘时点棋盘，先回到当前局面
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
@@ -1157,6 +1186,7 @@ function drawBoard(){
 function bindPieceDrag(div,r,c){
     div.onpointerdown=(e)=>{
         e.preventDefault();
+        if(editMode){ editPlace(r,c); return; }
         if(gameOver||isAiThinking||isAnalyzing) return;
         if(reviewIndex!==-1){ gotoLive(); return; }
         const isPlayerTurn=(turnRed&&playerSide===2)||(!turnRed&&playerSide===1);
@@ -1578,6 +1608,88 @@ async function analyzePosition(){
     }catch(e){ panel.innerHTML="<div>分析失败："+escapeHtml(e.message)+"</div>"; }
     analyzeBusy=false; btn.disabled=false; btn.innerText=oldTxt;
 }
+// ---------- 摆残局编辑器：手动摆局面，让皮卡鱼分析最优下法 ----------
+const EDIT_PIECE_DEFS=[
+  {side:2,id:1,n:'车'},{side:2,id:2,n:'马'},{side:2,id:3,n:'相'},{side:2,id:4,n:'仕'},{side:2,id:5,n:'帅'},{side:2,id:6,n:'炮'},{side:2,id:7,n:'兵'},
+  {side:1,id:1,n:'车'},{side:1,id:2,n:'马'},{side:1,id:3,n:'象'},{side:1,id:4,n:'士'},{side:1,id:5,n:'将'},{side:1,id:6,n:'炮'},{side:1,id:7,n:'卒'}
+];
+function buildEditBar(){
+  const box=document.getElementById('ebPieces'); box.innerHTML='';
+  const erase=document.createElement('button'); erase.className='eb-piece erase'; erase.textContent='橡皮';
+  erase.onclick=()=>{ editPiece='erase'; markEditSel(); }; box.appendChild(erase);
+  EDIT_PIECE_DEFS.forEach(def=>{
+    const b=document.createElement('button');
+    b.className='eb-piece '+(def.side===2?'red':'black');
+    b.textContent=def.n; b.dataset.side=def.side; b.dataset.id=def.id;
+    b.onclick=()=>{ editPiece={side:def.side,id:def.id}; markEditSel(); };
+    box.appendChild(b);
+  });
+}
+function markEditSel(){
+  document.querySelectorAll('#ebPieces .eb-piece').forEach(el=>{
+    let on=false;
+    if(editPiece==='erase') on=el.classList.contains('erase');
+    else if(editPiece) on=Number(el.dataset.side)===editPiece.side && Number(el.dataset.id)===editPiece.id;
+    el.classList.toggle('sel', on);
+  });
+  updateTurnBtns();
+}
+function updateTurnBtns(){
+  const r=document.getElementById('ebTurnRed'), b=document.getElementById('ebTurnBlack');
+  r.classList.toggle('on', !!turnRed); b.classList.toggle('on', !turnRed);
+}
+function editPlace(r,c){
+  if(editPiece==null){ infoDom.querySelector('div').innerText='请先在下方选择要摆放的棋子，再点棋盘'; return; }
+  if(editPiece==='erase'){ board[r][c]={side:0,id:0}; }
+  else { board[r][c]={side:editPiece.side, id:editPiece.id}; }
+  drawBoard(); renderPieces();
+}
+function enterEditMode(){
+  if(isAiThinking) return;
+  if(pikafishEngine && engineReady){ try{ pikafishEngine.stop(); }catch(e){} }
+  preEditBoard=JSON.parse(JSON.stringify(board));
+  preEditTurnRed=turnRed;
+  reviewIndex=-1;
+  editMode=true; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
+  buildEditBar();
+  document.getElementById('editBar').classList.add('show');
+  document.getElementById('analyzePanel').classList.remove('show');
+  updateTurnBtns();
+  infoDom.querySelector('div').innerText='摆残局模式：选棋子后点棋盘摆放，完成后点“开始 AI 分析”';
+  drawBoard(); renderPieces();
+}
+function exitEditMode(restore){
+  if(restore!==false && preEditBoard){
+    board=JSON.parse(JSON.stringify(preEditBoard)); turnRed=preEditTurnRed;
+  }
+  editMode=false; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
+  document.getElementById('editBar').classList.remove('show');
+  drawBoard(); renderPieces(); updateEvaluation();
+}
+function countKings(){
+  let rk=0, bk=0;
+  for(let r=0;r<10;r++)for(let c=0;c<9;c++){
+    const p=board[r][c];
+    if(p.id===5){ if(p.side===2) rk++; else if(p.side===1) bk++; }
+  }
+  return {rk,bk};
+}
+function validateCustomPosition(){
+  const {rk,bk}=countKings();
+  if(rk!==1 || bk!==1){
+    alert('残局需且仅需红帅、黑将各一个（当前 红 '+rk+' / 黑 '+bk+'），请调整后再分析。');
+    return false;
+  }
+  return true;
+}
+async function analyzeCustom(){
+  if(!validateCustomPosition()) return;
+  editMode=false; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
+  document.getElementById('editBar').classList.remove('show');
+  drawBoard(); renderPieces();
+  await analyzePosition();
+  infoDom.querySelector('div').innerText='残局分析完成（当前轮到 '+(turnRed?'红':'黑')+' 方走子）';
+}
 // ---------- 第二梯队：着法质量评估 ----------
 // 棋盘坐标 -> 皮卡鱼 UCI（parsePikafishMove 的逆运算）
 // 玩家落子：先对“落子前局面”做一次引擎分析（用于着法质量），再真正走子
@@ -1743,6 +1855,12 @@ function bindExtEvents(){
     $('rvNext').onpointerdown=(e)=>{e.preventDefault();stepReview(1);};
     $('rvLive').onpointerdown=(e)=>{e.preventDefault();gotoLive();};
     $('analyzeBtn').onpointerdown=(e)=>{e.preventDefault();analyzePosition();};
+    $('editBtn').onpointerdown=(e)=>{ e.preventDefault(); enterEditMode(); };
+    $('ebClear').onclick=()=>{ for(let r=0;r<10;r++)for(let c=0;c<9;c++)board[r][c]={side:0,id:0}; drawBoard(); renderPieces(); };
+    $('ebTurnRed').onclick=()=>{ turnRed=true; updateTurnBtns(); };
+    $('ebTurnBlack').onclick=()=>{ turnRed=false; updateTurnBtns(); };
+    $('ebAnalyze').onclick=()=>{ analyzeCustom(); };
+    $('ebExit').onclick=()=>{ exitEditMode(true); infoDom.querySelector('div').innerText='已退出摆残局，恢复原对局'; };
     $('resultRestart').onclick=()=>{$('resultModal').classList.remove('show');resetGame();};
     $('resultReview').onclick=()=>{$('resultModal').classList.remove('show');$('moveList').classList.add('show');gotoReview(moveRecords.length-1);};
     $('gamesClose').onpointerdown=(e)=>{e.preventDefault();$('gamesModal').classList.remove('show');};
