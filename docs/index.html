@@ -1091,7 +1091,6 @@ canvas.onpointerdown = function(e){
 
 function handleClick(r,c){
     if(editMode){ editPlace(r,c); return; }
-    if(demoLocked) return;
     if(gameOver || isAiThinking || hintBusy || isAnalyzing) return;
     if(reviewIndex!==-1){ gotoLive(); return; } // 复盘时点棋盘，先回到当前局面
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
@@ -1224,8 +1223,49 @@ function drawBoard(){
 function bindPieceDrag(div,r,c){
     div.onpointerdown=(e)=>{
         e.preventDefault();
-        if(editMode){ editPlace(r,c); return; }
-        if(demoLocked) return;
+        if(editMode){
+            // 摆残局：点已有棋子可拖去新格；点空格按工具条棋子摆放
+            const it=board[r][c];
+            if(it.id!==0){
+                try{ div.setPointerCapture(e.pointerId); }catch(_){}
+                const rect=boardWrap.getBoundingClientRect();
+                const sx=rect.width?rect.width/BOARD_DESIGN_W:1;
+                const sy=rect.height?rect.height/BOARD_DESIGN_H:1;
+                const startX=e.clientX,startY=e.clientY;
+                let dragging=false;
+                const design=(ev)=>({x:(ev.clientX-rect.left)/sx, y:(ev.clientY-rect.top)/sy});
+                const moveH=(ev)=>{
+                    if(!dragging){
+                        const dx=(ev.clientX-startX)/sx, dy=(ev.clientY-startY)/sy;
+                        if(Math.hypot(dx,dy)<=14) return;
+                        dragging=true; div.classList.add('dragging');
+                    }
+                    const p=design(ev);
+                    div.style.left=(p.x-23)+'px'; div.style.top=(p.y-23)+'px';
+                };
+                const upH=(ev)=>{
+                    div.removeEventListener('pointermove',moveH);
+                    div.removeEventListener('pointerup',upH);
+                    div.removeEventListener('pointercancel',upH);
+                    div.classList.remove('dragging');
+                    if(dragging){
+                        const p=design(ev);
+                        let tc=Math.round((p.x-ox)/cell), tr=Math.round((p.y-oy)/cell);
+                        if(boardFlipped()){ tr=9-tr; tc=8-tc; }
+                        if(tr>=0&&tr<=9&&tc>=0&&tc<=8&&!(tr===r&&tc===c)){
+                            board[tr][tc]={side:it.side, id:it.id};
+                            board[r][c]={side:0,id:0};
+                        }
+                        drawBoard(); renderPieces();
+                    }
+                };
+                div.addEventListener('pointermove',moveH);
+                div.addEventListener('pointerup',upH);
+                div.addEventListener('pointercancel',upH);
+                return;
+            }
+            editPlace(r,c); return;
+        }
         if(gameOver||isAiThinking||isAnalyzing) return;
         if(reviewIndex!==-1){ gotoLive(); return; }
         const isPlayerTurn=(turnRed&&playerSide===2)||(!turnRed&&playerSide===1);
@@ -1729,7 +1769,6 @@ async function analyzeCustom(){
   document.getElementById('editBar').classList.remove('show');
   drawBoard(); renderPieces();
   await analyzePosition();
-  demoLocked=true;
   infoDom.querySelector('div').innerText='残局分析完成（当前轮到 '+(turnRed?'红':'黑')+' 方走子）';
 }
 // ---------- 第二梯队：着法质量评估 ----------
