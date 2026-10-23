@@ -328,6 +328,8 @@ let capturedByBlack = []; // 黑方吃掉的红子 id
 let evalHistory = [];     // 每步之后的红方视角评估分
 let reviewIndex = -1;     // 复盘位置：-1=当前实时局面，>=0=正在看第几步之后
 let hintMove = null;      // 引擎提示着法 {sr,sc,tr,tc}
+let demoArrow = null;       // 残局/分析推荐着法箭头 {sr,sc,tr,tc}
+let demoLocked = false;     // 残局演示模式：锁定棋盘，棋子不可再走
 let hintBusy = false;     // 正在向引擎求提示，锁住棋盘避免并发
 let gameResult = null;    // 'red' | 'black' | null
 let soundOn = true;       // 音效开关
@@ -1089,6 +1091,7 @@ canvas.onpointerdown = function(e){
 
 function handleClick(r,c){
     if(editMode){ editPlace(r,c); return; }
+    if(demoLocked) return;
     if(gameOver || isAiThinking || hintBusy || isAnalyzing) return;
     if(reviewIndex!==-1){ gotoLive(); return; } // 复盘时点棋盘，先回到当前局面
     const isPlayerTurn = (turnRed && playerSide===2) || (!turnRed && playerSide===1);
@@ -1197,6 +1200,23 @@ function drawBoard(){
         ctx.closePath(); ctx.fill();
         ctx.lineWidth=2; ctx.lineCap="butt";
     }
+    // 残局/分析推荐着法：蓝色粗箭头 + 起点圆圈，持续显示
+    if(demoArrow){
+        const ax1=ox+viewC(demoArrow.sc)*cell, ay1=oy+viewR(demoArrow.sr)*cell;
+        const ax2=ox+viewC(demoArrow.tc)*cell, ay2=oy+viewR(demoArrow.tr)*cell;
+        ctx.strokeStyle="rgba(20,90,220,0.88)";
+        ctx.fillStyle="rgba(20,90,220,0.88)";
+        ctx.lineWidth=8; ctx.lineCap="round";
+        ctx.beginPath(); ctx.moveTo(ax1,ay1); ctx.lineTo(ax2,ay2); ctx.stroke();
+        const aAng=Math.atan2(ay2-ay1,ax2-ax1), ah=16;
+        ctx.beginPath(); ctx.moveTo(ax2,ay2);
+        ctx.lineTo(ax2-ah*Math.cos(aAng-0.42), ay2-ah*Math.sin(aAng-0.42));
+        ctx.lineTo(ax2-ah*Math.cos(aAng+0.42), ay2-ah*Math.sin(aAng+0.42));
+        ctx.closePath(); ctx.fill();
+        ctx.lineWidth=3;
+        ctx.beginPath(); ctx.arc(ax1,ay1,20,0,Math.PI*2); ctx.stroke();
+        ctx.lineWidth=2; ctx.lineCap="butt";
+    }
 }
 
 
@@ -1205,6 +1225,7 @@ function bindPieceDrag(div,r,c){
     div.onpointerdown=(e)=>{
         e.preventDefault();
         if(editMode){ editPlace(r,c); return; }
+        if(demoLocked) return;
         if(gameOver||isAiThinking||isAnalyzing) return;
         if(reviewIndex!==-1){ gotoLive(); return; }
         const isPlayerTurn=(turnRed&&playerSide===2)||(!turnRed&&playerSide===1);
@@ -1623,6 +1644,7 @@ async function analyzePosition(){
             html+="<div class=\"ap-line\"><span class=\"ap-no\">"+(idx+1)+"</span><span class=\"ap-score\">"+score+"</span><span class=\"ap-pv\">"+pvs+"</span></div>";
         });
         panel.innerHTML=html;
+        try{ const fp=lines[0]&&lines[0].pv&&lines[0].pv[0]; demoArrow=fp?parsePikafishMove(fp):null; drawBoard(); }catch(_){}
     }catch(e){ panel.innerHTML="<div>分析失败："+escapeHtml(e.message)+"</div>"; }
     analyzeBusy=false; btn.disabled=false; btn.innerText=oldTxt;
 }
@@ -1668,7 +1690,7 @@ function enterEditMode(){
   preEditBoard=JSON.parse(JSON.stringify(board));
   preEditTurnRed=turnRed;
   reviewIndex=-1;
-  editMode=true; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
+  editMode=true; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false; demoArrow=null; demoLocked=false;
   buildEditBar();
   document.getElementById('editBar').classList.add('show');
   document.getElementById('analyzePanel').classList.remove('show');
@@ -1681,6 +1703,7 @@ function exitEditMode(restore){
     board=JSON.parse(JSON.stringify(preEditBoard)); turnRed=preEditTurnRed;
   }
   editMode=false; editPiece=null; selected=null; validMoves=[]; hintMove=null; gameOver=false;
+  demoArrow=null; demoLocked=false;
   document.getElementById('editBar').classList.remove('show');
   drawBoard(); renderPieces(); updateEvaluation();
 }
@@ -1706,6 +1729,7 @@ async function analyzeCustom(){
   document.getElementById('editBar').classList.remove('show');
   drawBoard(); renderPieces();
   await analyzePosition();
+  demoLocked=true;
   infoDom.querySelector('div').innerText='残局分析完成（当前轮到 '+(turnRed?'红':'黑')+' 方走子）';
 }
 // ---------- 第二梯队：着法质量评估 ----------
