@@ -205,6 +205,7 @@ select{touch-action:manipulation;}
         <button id="movesBtn">棋谱</button>
         <button id="gamesBtn">对局记录</button>
         <button id="exportBtn">导出棋谱</button>
+        <button id="loginBtn">👤 登录</button>
         <button id="installBtn" style="display:none">安装到桌面</button>
     </div>
 </div>
@@ -1543,6 +1544,19 @@ function finishGameResult(){
     document.getElementById('resultModal').classList.add('show');
     saveFinishedGame();
     try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+    // 云端保存战绩（已登录才生效）
+    try{
+      if(window.saveMyGame){
+        const diffMap = {2:1, 6:2, 10:3, 15:4, 20:5};
+        const diffVal = parseInt(document.getElementById('difficulty').value||'10',10);
+        window.saveMyGame({
+          result: youWin ? 'win' : 'lose',
+          difficulty: diffMap[diffVal] || 3,
+          moves: moveRecords,
+          finalFen: ''
+        });
+      }
+    }catch(e){ console.warn('云端保存失败:', e); }
 }
 
 // ---------- 健壮性：安全读取存档 / 转义 ----------
@@ -2030,6 +2044,81 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ===== 云端账号与战绩（Supabase）=====
+(function(){
+  const SUPABASE_URL = 'https://rtifirlvdgsirghxvswn.supabase.co';
+  const SUPABASE_ANON = 'sb_publishable_PAZDkGrjQ-nur8UySXkXdA_sziLgGXX';
+  let sb = null;
+  try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: true, autoRefreshToken: true } }); }
+  catch(e){ console.warn('Supabase 初始化失败:', e); }
+
+  const loginBtn = document.getElementById('loginBtn');
+
+  function refreshBtn(user){
+    if(!loginBtn) return;
+    loginBtn.textContent = user ? '👤 ' + (user.email||'已登录').split('@')[0] : '👤 登录';
+  }
+
+  async function loadStats(){
+    if(!sb) return;
+    const { data: { user } } = await sb.auth.getUser();
+    if(!user) return;
+    const { data } = await sb.from('games').select('result');
+    if(!data) return;
+    const total = data.length;
+    const win = data.filter(g=>g.result==='win').length;
+    const lose = data.filter(g=>g.result==='lose').length;
+    const draw = data.filter(g=>g.result==='draw').length;
+    alert(`我的战绩\n总对局：${total}\n胜：${win}　负：${lose}　和：${draw}\n胜率：${total?Math.round(win/total*100):0}%`);
+  }
+
+  if(loginBtn){
+    loginBtn.addEventListener('click', async ()=>{
+      const { data: { user } } = await sb.auth.getUser();
+      if(user){
+        if(confirm('已登录：' + user.email + '\n点确定查看战绩，取消则退出登录。')){
+          loadStats();
+        } else {
+          await sb.auth.signOut();
+          refreshBtn(null);
+          alert('已退出登录');
+        }
+        return;
+      }
+      // 未登录：用邮箱发魔法链接
+      const email = prompt('输入你的邮箱，我们会发一个登录链接到邮箱：');
+      if(!email) return;
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: location.origin + location.pathname }
+      });
+      if(error){ alert('发送失败：' + error.message); return; }
+      alert('登录链接已发送到 ' + email + '\n请去邮箱点击链接完成登录，然后刷新本页面。');
+    });
+  }
+
+  // 监听登录状态变化
+  if(sb){
+    sb.auth.onAuthStateChange((event, session)=>{
+      refreshBtn(session?.user || null);
+    });
+    sb.auth.getUser().then(({data})=>refreshBtn(data?.user||null));
+  }
+
+  // 暴露给游戏结束时调用：保存一局
+  window.saveMyGame = async function({result, difficulty, moves, finalFen}){
+    if(!sb) return {ok:false, reason:'未初始化'};
+    const { data: { user } } = await sb.auth.getUser();
+    if(!user) return {ok:false, reason:'未登录'};
+    const { error } = await sb.from('games').insert({
+      user_id: user.id, result, difficulty, moves: JSON.stringify(moves||[]), final_fen: finalFen||''
+    });
+    return error ? {ok:false, reason:error.message} : {ok:true};
+  };
+})();
 </script>
 </body>
 </html>
