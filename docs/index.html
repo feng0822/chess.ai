@@ -2088,15 +2088,15 @@ if ('serviceWorker' in navigator) {
         }
         return;
       }
-      // 未登录：用邮箱发魔法链接
-      const email = prompt('输入你的邮箱，我们会发一个登录链接到邮箱：');
+      // 未登录：邮箱+密码登录
+      const email = prompt('登录邮箱：');
       if(!email) return;
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: location.origin + location.pathname }
-      });
-      if(error){ alert('发送失败：' + error.message); return; }
-      alert('登录链接已发送到 ' + email + '\n请去邮箱点击链接完成登录，然后刷新本页面。');
+      const password = prompt('登录密码：');
+      if(!password) return;
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if(error){ alert('登录失败：' + error.message); return; }
+      alert('登录成功！');
+      refreshBtn({email});
     });
   }
 
